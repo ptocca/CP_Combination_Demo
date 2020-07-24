@@ -8,9 +8,9 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.5.2
 #   kernelspec:
-#     display_name: Python-comb_demo
+#     display_name: Python(comb_demo)
 #     language: python
-#     name: python-comb_demo
+#     name: comb_demo
 # ---
 
 # %% [markdown]
@@ -360,7 +360,7 @@ def ECDF_comb(comb_func, ps, ps_cal):
     Example: ECDF_comb(minimum, ps_test_0, ps_cal_0[y_cal==0])"""
     p_comb = comb_func(ps)
     ps_cal_comb = comb_func(ps_cal)
-    return ECDF_cal_p(p_comb, ps_comb_cal)
+    return ECDF_cal_p(p_comb, ps_cal_comb)
 
 
 # %%
@@ -372,7 +372,7 @@ def KolmogorovAveraging(p_vals, phi, phi_inv):
 # ## Arithmetic mean
 
 # %%
-def comb_arithmetic(ps):
+def comb_arithmetic(ps, _=None):
     return np.mean(ps, axis=1)
 
 def comb_arithmetic_ECDF(ps, ps_cal):
@@ -400,7 +400,7 @@ Irwin_Hall_CDF = np.vectorize(Irwin_Hall_CDF_base, excluded=(1, "n"))
 from functools import partial
 
 
-def comb_arithmetic_q(ps):
+def comb_arithmetic_q(ps, _=None):
     phi = lambda x: x.shape[1] * x
     phi_inv = partial(Irwin_Hall_CDF, n=ps.shape[1])
     return KolmogorovAveraging(ps, phi, phi_inv)
@@ -414,8 +414,17 @@ import scipy.stats as ss
 
 # %%
 # %%
-def comb_geometric(ps):
+def comb_geometric(ps, _=None):
     return ss.gmean(ps, axis=1)
+
+# %%
+def fisher(p):
+    k = np.sum(np.log(p), axis=1).reshape(-1, 1)
+    fs = -k / np.arange(1, p.shape[1]).reshape(1, -1)
+    return np.sum(np.exp(
+        k + np.cumsum(np.c_[np.zeros(shape=(p.shape[1])), np.log(fs)], axis=1)),
+        axis=1)
+
 
 # %%
 
@@ -425,40 +434,29 @@ def comb_geometric_ECDF(ps, ps_cal):
 # %%
 
 
-# %%
-c_cf_geom, precision_geom = cp_statistics(p_0_geom, p_1_geom, None, None,
-                                          y_test, "_geom", " geom");
-
-# %%
-c_cf_geom_ECDF, precision_geom_ECDF = cp_statistics(p_0_geom_ECDF,
-                                                    p_1_geom_ECDF, None, None,
-                                                    y_test, "_geom_ECDF",
-                                                    " geom (ECDF)");
-
-
 # %% [markdown]
 # ## Max p
 
 # %%
-def comb_maximum(p):
-    return np.max(p, axis=1)
+def comb_maximum(ps, _=None):
+    return np.max(ps, axis=1)
 
 
 # %%
 def comb_maximum_ECDF(ps, ps_cal):
     return ECDF_comb(comb_minimum, ps, ps_cal)
 # %%
-def comb_maximum_q(p):
-    max_p = np.max(p, axis=1)
-    phi_inv = ss.beta(a=p.shape[1], b=1).cdf
+def comb_maximum_q(ps, _=None):
+    max_ps = comb_maximum(ps)
+    phi_inv = ss.beta(a=ps.shape[1], b=1).cdf
 
-    return phi_inv(max_p)
+    return phi_inv(max_ps)
 
 # %% [markdown]
 # ## Minimum and Bonferroni
 
 # %%
-def comb_minimum(ps):
+def comb_minimum(ps, _=None):
     return np.min(ps, axis=1)
 
 
@@ -471,54 +469,40 @@ def comb_minimum_ECDF(ps, ps_cal):
 # The k-order statistic of n uniformly distributed variates is distributed as Beta(k,n+1-k).
 
 # %%
-def comb_minimum_q(p):
-    min_p = comb_minimum(p, axis=1)
-    phi_inv = ss.beta(a=1, b=p.shape[1]).cdf
+def comb_minimum_q(ps, _=None):
+    min_ps = comb_minimum(ps)
+    phi_inv = ss.beta(a=1, b=ps.shape[1]).cdf
 
-    return phi_inv(min_p)
-
-# %%
-
-def comb_bonferroni(ps):
-    return np.clip(ps_0.shape[1] * np.min(ps_0, axis=1), 0, 1)
-
+    return phi_inv(min_ps)
 
 # %%
-def comb_bonferroni_q(p):
-    b_p = p.shape[1] * np.min(p, axis=1)
-    phi_inv = ss.beta(a=1, b=p.shape[1]).cdf
+def comb_bonferroni(ps, _=None):
+    return np.clip(ps.shape[1] * np.min(ps, axis=1), 0, 1)
 
-    return np.where(b_p < 1.0 / p.shape[1],
-                    phi_inv(b_p / p.shape[1]),
+
+# %%
+def comb_bonferroni_q(ps, _=None):
+    b_ps= p.shape[1] * np.min(ps, axis=1)
+    phi_inv = ss.beta(a=1, b=ps.shape[1]).cdf
+
+    return np.where(b_ps < 1.0 / ps.shape[1],
+                    phi_inv(b_ps / ps.shape[1]),
                     1.0)
 
 
 # %%
-methods = {"Arithmetic Mean": SimpleCombination.mean,
-           "Geometric Mean": SimpleCombination.geom,
-           "Maximum": SimpleCombination.maximum,
-           "Minimum": SimpleCombination.minimum,
-           "Bonferroni": SimpleCombination.bonferroni,
+methodFunc = {"Arithmetic Mean": comb_arithmetic,
+              "Arithmetic Mean (quantile)": comb_arithmetic_q,
+              "Arithmetic Mean (ECDF)": comb_arithmetic_ECDF,
+              "Geometric Mean": comb_geometric,
+#              "Geometric Mean (quantile)": fisher, # comb_geometric_q,
+              "Geometric Mean (ECDF)": comb_geometric_ECDF,
+              "Minimum": comb_minimum,
+              "Bonferroni": comb_bonferroni,
+              "Minimum (quantile)": comb_minimum_q,
+              "Minimum (ECDF)": comb_minimum_ECDF,
+              }
 
-           "Arithmetic (Quantile)": SimpleCombination.mean_q
-           "Geometric (Quantile) Fisher": SimpleCombination.geom_q,
-           "Max (Quantile)": SimpleCombination.maximum_q,
-           "Min (Quantile)": SimpleCombination.minimum_q,
-           "Bonferroni (Quantile)": SimpleCombination.bonferroni_q
-
-           "Arithmetic (ECDF)": SimpleCombination.mean_ecdf,
-           "Geometric (ECDF)": SimpleCombination.geom_ecdf,
-           "Fisher (ECDF)": SimpleCombination.fisher_ecdf
-           "Max (ECDF)": SimpleCombination.maximum_ecdf}
-
-
-# %%
-
-# %%
-
-# %%
-
-# %%
 
 # %%
 class SimpleCombination(param.Parameterized):
@@ -527,7 +511,7 @@ class SimpleCombination(param.Parameterized):
     p_comb_0 = param.Array(precedence=-1)
     p_comb_1 = param.Array(precedence=-1)
 
-    method = param.Selector(['Min', 'Mean', 'Fisher'])
+    method = param.Selector(list(methodFunc.keys()))
 
     def __init__(self, sd, micp, **params):
         self.sd = sd
@@ -539,14 +523,15 @@ class SimpleCombination(param.Parameterized):
                 "method", watch=True)
     def update(self):
         comb_method = methodFunc[self.method]
+        y_pcal = self.sd.output['y_pcal']
         ps_0 = np.c_[self.micp.p_0_a, self.micp.p_0_b]
-        ps_cal_0 = np.c[self.micp.p_0_a[y_cal == 0], self.micp.p_0_b[y_cal == 0]
+        ps_pcal_0 = np.c_[self.micp.p_0_a_cal[y_pcal == 0], self.micp.p_0_b_cal[y_pcal == 0]]
         ps_1 = np.c_[self.micp.p_1_a, self.micp.p_1_b]
-        ps_cal_1 = np.c[self.micp.p_1_a[y_cal == 1], self.micp.p_1_b[y_cal == 1]
+        ps_pcal_1 = np.c_[self.micp.p_1_a_cal[y_pcal == 1], self.micp.p_1_b_cal[y_pcal == 1]]
 
         with param.batch_watch(self):
-            self.p_comb_0 = comb_method(ps_0, ps_cal_0)
-        self.p_comb_1 = comb_method()
+            self.p_comb_0 = comb_method(ps_0, ps_pcal_0)
+            self.p_comb_1 = comb_method(ps_1, ps_pcal_1)
 
     def view_table(self):
         return cp_cm_widget(self.p_comb_0, self.p_comb_1,
@@ -563,18 +548,7 @@ class SimpleCombination(param.Parameterized):
         return f
 
 
-methodFunc = {"Arithmetic Mean": comb_arithmetic,
-              "Arithmetic Mean (quantile)": comb_arithmetic_q,
-              "Arithmetic Mean (ECDF)": comb_arithmetic_ECDF,
-              "Geometric Mean": comb_geometric,
-              "Geometric Mean (quantile)": comb_geometric_q,
-              "Geometric Mean (ECDF)": comb_geometric_ECDF,
-              "Minimum": comb_minimum,
-              "Bonferroni": comb_bonferroni,
-              "Minimum (quantile)": comb_minimum_q,
-              "Minimum (ECDF)": comb_minimum_ECDF,
-              }
-
+# %%
 sc = SimpleCombination(sd, micp)
 
 
@@ -607,6 +581,10 @@ class App(param.Parameterized):
 # %%
 app = App(sd, micp, sc)
 app.view()
+
+# %%
+
+# %%
 
 # %%
 # ss.pearsonr(p_0_a,p_0_b),ss.pearsonr(p_1_a,p_1_b)
@@ -642,43 +620,8 @@ ax.plot(*ecdf(p_0_b_cal[y_cal == 0]))
 ax.plot(*ecdf(p_1_a_cal[y_cal == 1]))
 ax.plot(*ecdf(p_1_b_cal[y_cal == 1]))
 
-
 # %% [markdown]
 # ## Fisher combination
-
-# %%
-def fisher(p):
-    k = np.sum(np.log(p), axis=1).reshape(-1, 1)
-    fs = -k / np.arange(1, p.shape[1]).reshape(1, -1)
-    return np.sum(np.exp(
-        k + np.cumsum(np.c_[np.zeros(shape=(p.shape[0])), np.log(fs)], axis=1)),
-        axis=1)
-
-
-# %%
-p_0_f = fisher(ps_0)
-p_1_f = fisher(ps_1)
-
-# %%
-p_0_cal_f = fisher(ps_0_cal)
-p_1_cal_f = fisher(ps_1_cal)
-
-# %%
-c_cf_f, precision_f = cp_statistics(p_0_f, p_1_f, None, None, y_test, "_f",
-                                    " Fisher Combination");
-
-# %%
-p_0_f_ECDF = ECDF_cal_p(p_0_f, p_0_cal_f[y_cal == 0])
-p_1_f_ECDF = ECDF_cal_p(p_1_f, p_1_cal_f[y_cal == 1])
-
-# %%
-c_cf_f_ECDF, precision_f_ECDF = cp_statistics(p_0_f_ECDF, p_1_f_ECDF, None,
-                                              None, y_test, "_f_ECDF",
-                                              " Fisher Combination (ECDF)");
-
-# %%
-
-# %%
 
 # %%
 
