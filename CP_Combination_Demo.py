@@ -259,6 +259,10 @@ class MICP(param.Parameterized):
     p_1_a = param.Array(precedence=-1)
     p_0_b = param.Array(precedence=-1)
     p_1_b = param.Array(precedence=-1)
+    p_0_a_cal = param.Array(precedence=-1)
+    p_1_a_cal = param.Array(precedence=-1)
+    p_0_b_cal = param.Array(precedence=-1)
+    p_1_b_cal = param.Array(precedence=-1)
 
     def __init__(self, sd, **params):
         self.sd = sd
@@ -288,20 +292,19 @@ class MICP(param.Parameterized):
                 calibrationAlphas=ncm(scores_cal_b[y_cal == 1], 1),
                 testAlphas=ncm(scores_test_b, 1),
                 randomized=randomize)
+            self.p_0_a_cal = pValues(calibrationAlphas=ncm(scores_cal_a[y_cal == 0], 0),
+                                     testAlphas=ncm(scores_pcal_a, 0),
+                                     randomized=randomize)
+            self.p_1_a_cal = pValues(calibrationAlphas=ncm(scores_cal_a[y_cal == 1], 1),
+                                     testAlphas=ncm(scores_pcal_a, 1),
+                                     randomized=randomize)
 
-        p_0_a_cal = pValues(calibrationAlphas=ncm(scores_cal_a[y_cal == 0], 0),
-                            testAlphas=ncm(scores_pcal_a, 0),
-                            randomized=randomize)
-        p_1_a_cal = pValues(calibrationAlphas=ncm(scores_cal_a[y_cal == 1], 1),
-                            testAlphas=ncm(scores_pcal_a, 1),
-                            randomized=randomize)
-
-        p_0_b_cal = pValues(calibrationAlphas=ncm(scores_cal_b[y_cal == 0], 0),
-                            testAlphas=ncm(scores_pcal_b, 0),
-                            randomized=randomize)
-        p_1_b_cal = pValues(calibrationAlphas=ncm(scores_cal_b[y_cal == 1], 1),
-                            testAlphas=ncm(scores_pcal_b, 1),
-                            randomized=randomize)
+            self.p_0_b_cal = pValues(calibrationAlphas=ncm(scores_cal_b[y_cal == 0], 0),
+                                     testAlphas=ncm(scores_pcal_b, 0),
+                                     randomized=randomize)
+            self.p_1_b_cal = pValues(calibrationAlphas=ncm(scores_cal_b[y_cal == 1], 1),
+                                     testAlphas=ncm(scores_pcal_b, 1),
+                                     randomized=randomize)
 
     @pn.depends("sd.output", watch=True)
     def update(self):
@@ -369,20 +372,18 @@ def KolmogorovAveraging(p_vals, phi, phi_inv):
 # ## Arithmetic mean
 
 # %%
-p_0_cal_avg = np.mean(ps_0_cal, axis=1)
-p_1_cal_avg = np.mean(ps_1_cal, axis=1)
+def comb_arithmetic(ps):
+    return np.mean(ps, axis=1)
 
-p_0_avg_ECDF = ECDF_cal_p(p_0_avg, p_0_cal_avg[y_cal == 0])
-p_1_avg_ECDF = ECDF_cal_p(p_1_avg, p_1_cal_avg[y_cal == 1])
-
-# %%
-from scipy.special import factorial, comb
+def comb_arithmetic_ECDF(ps, ps_cal):
+    return ECDF_comb(comb_arithmetic, ps, ps_cal)
 
 
 # %%
 # Unoptimized Irwin-Hall CDF
 # Bates is the distribution of the mean of N independent uniform RVs
 # Irwin-Hall is the distribution of the sum
+from scipy.special import factorial, comb
 
 def Irwin_Hall_CDF_base(x, n):
     acc = 0
@@ -399,15 +400,11 @@ Irwin_Hall_CDF = np.vectorize(Irwin_Hall_CDF_base, excluded=(1, "n"))
 from functools import partial
 
 
-def pVal_ArithmeticMean_quantile(p):
+def comb_arithmetic_q(ps):
     phi = lambda x: x.shape[1] * x
-    phi_inv = partial(Irwin_Hall_CDF, n=p.shape[1])
-    return KolmogorovAveraging(p, phi, phi_inv)
+    phi_inv = partial(Irwin_Hall_CDF, n=ps.shape[1])
+    return KolmogorovAveraging(ps, phi, phi_inv)
 
-
-# %%
-p_0_avg_q = pVal_ArithmeticMean_quantile(ps_0)
-p_1_avg_q = pVal_ArithmeticMean_quantile(ps_1)
 
 # %% [markdown]
 # ## Geometric mean
@@ -416,18 +413,17 @@ p_1_avg_q = pVal_ArithmeticMean_quantile(ps_1)
 import scipy.stats as ss
 
 # %%
-p_0_geom = ss.gmean(ps_0, axis=1)
-p_1_geom = ss.gmean(ps_1, axis=1)
+# %%
+def comb_geometric(ps):
+    return ss.gmean(ps, axis=1)
 
 # %%
 
-# %%
-p_0_cal_geom = ss.gmean(ps_0_cal, axis=1)
-p_1_cal_geom = ss.gmean(ps_1_cal, axis=1)
+def comb_geometric_ECDF(ps, ps_cal):
+    return ECDF_comb(comb_geometric, ps, ps_cal)
 
 # %%
-p_0_geom_ECDF = ECDF_cal_p(p_0_geom, p_0_cal_geom[y_cal == 0])
-p_1_geom_ECDF = ECDF_cal_p(p_1_geom, p_1_cal_geom[y_cal == 1])
+
 
 # %%
 c_cf_geom, precision_geom = cp_statistics(p_0_geom, p_1_geom, None, None,
@@ -444,126 +440,58 @@ c_cf_geom_ECDF, precision_geom_ECDF = cp_statistics(p_0_geom_ECDF,
 # ## Max p
 
 # %%
-def maximum(p):
+def comb_maximum(p):
     return np.max(p, axis=1)
 
 
-
 # %%
-p_0_cal_max = np.max(ps_0_cal, axis=1)
-p_1_cal_max = np.max(ps_1_cal, axis=1)
-
+def comb_maximum_ECDF(ps, ps_cal):
+    return ECDF_comb(comb_minimum, ps, ps_cal)
 # %%
-p_0_max_ECDF = ECDF_cal_p(p_0_max, p_0_cal_max[y_cal == 0])
-p_1_max_ECDF = ECDF_cal_p(p_1_max, p_1_cal_max[y_cal == 1])
-
-
-# %% [markdown]
-# The k-order statistic of n uniformly distributed variates is distributed as Beta(k,n+1-k).
-
-# %%
-def pVal_Max_quantile(p):
+def comb_maximum_q(p):
     max_p = np.max(p, axis=1)
     phi_inv = ss.beta(a=p.shape[1], b=1).cdf
 
     return phi_inv(max_p)
 
-
-# %%
-p_0_max_q = pVal_Max_quantile(ps_0)
-p_1_max_q = pVal_Max_quantile(ps_1)
-
-# %%
-c_cf_max, precision_max = cp_statistics(p_0_max, p_1_max, None, None, y_test,
-                                        "_max", " max");
-
-# %%
-c_cf_max_q, precision_max_q = cp_statistics(p_0_max_q, p_1_max_q, None, None,
-                                            y_test, "_max_q",
-                                            " max (quantile)");
-
-# %%
-c_cf_max_ECDF, precision_max_ECDF = cp_statistics(p_0_max_ECDF, p_1_max_ECDF,
-                                                  None, None, y_test,
-                                                  "_max_ECDF", " max (ECDF)");
-
 # %% [markdown]
 # ## Minimum and Bonferroni
 
 # %%
-p_0_min = np.min(ps_0, axis=1)
-p_1_min = np.min(ps_1, axis=1)
+def comb_minimum(ps):
+    return np.min(ps, axis=1)
+
 
 # %%
-p_0_cal_min = np.min(ps_0_cal, axis=1)
-p_1_cal_min = np.min(ps_1_cal, axis=1)
-
-# %%
-p_0_min_ECDF = ECDF_cal_p(p_0_min, p_0_cal_min[y_cal == 0])
-p_1_min_ECDF = ECDF_cal_p(p_1_min, p_1_cal_min[y_cal == 1])
+def comb_minimum_ECDF(ps, ps_cal):
+    return ECDF_comb(comb_minimum, ps, ps_cal)
 
 
 # %% [markdown]
 # The k-order statistic of n uniformly distributed variates is distributed as Beta(k,n+1-k).
 
 # %%
-def pVal_Min_quantile(p):
-    max_p = np.min(p, axis=0)
-    phi_inv = ss.beta(a=1, b=p.shape[0]).cdf
+def comb_minimum_q(p):
+    min_p = comb_minimum(p, axis=1)
+    phi_inv = ss.beta(a=1, b=p.shape[1]).cdf
 
-    return phi_inv(max_p)
+    return phi_inv(min_p)
+
+# %%
+
+def comb_bonferroni(ps):
+    return np.clip(ps_0.shape[1] * np.min(ps_0, axis=1), 0, 1)
 
 
 # %%
-p_0_min_q = pVal_Min_quantile(ps_0.T)
-p_1_min_q = pVal_Min_quantile(ps_1.T)
+def comb_bonferroni_q(p):
+    b_p = p.shape[1] * np.min(p, axis=1)
+    phi_inv = ss.beta(a=1, b=p.shape[1]).cdf
 
-# %%
-c_cf_min, precision_max = cp_statistics(p_0_min, p_1_min, None, None, y_test,
-                                        "_min", " min");
-
-# %%
-c_cf_min_q, precision_min_q = cp_statistics(p_0_min_q, p_1_min_q, None, None,
-                                            y_test, "_min_q",
-                                            " min (quantile)");
-
-# %%
-c_cf_min_ECDF, precision_min_ECDF = cp_statistics(p_0_min_ECDF, p_1_min_ECDF,
-                                                  None, None, y_test,
-                                                  "_min_ECDF", " min (ECDF)");
-
-# %%
-ps_0.shape
-
-# %%
-p_0_bonf = np.clip(ps_0.shape[1] * np.min(ps_0, axis=1), 0, 1)
-p_1_bonf = np.clip(ps_1.shape[1] * np.min(ps_1, axis=1), 0, 1)
-
-# %%
-c_cf_bonf, precision_bonf = cp_statistics(p_0_bonf, p_1_bonf, None, None,
-                                          y_test, "_bonf", " Bonferroni");
-
-
-# %%
-def pVal_Bonf_quantile(p):
-    b_p = p.shape[0] * np.min(p, axis=1)
-    phi_inv = ss.beta(a=1, b=p.shape[0]).cdf
-
-    return np.where(b_p < 1.0 / p.shape[0],
-                    phi_inv(b_p / p.shape[0]),
+    return np.where(b_p < 1.0 / p.shape[1],
+                    phi_inv(b_p / p.shape[1]),
                     1.0)
 
-
-# %%
-p_0_bonf_q = pVal_Bonf_quantile(ps_0)
-p_1_bonf_q = pVal_Bonf_quantile(ps_1)
-
-# %%
-c_cf_bonf_q, precision_bonf_q = cp_statistics(p_0_a, p_1_a, None, None, y_test,
-                                              "_bonf_q",
-                                              " Bonferroni (quantile)");
-
-# %%
 
 # %%
 methods = {"Arithmetic Mean": SimpleCombination.mean,
@@ -611,9 +539,14 @@ class SimpleCombination(param.Parameterized):
                 "method", watch=True)
     def update(self):
         comb_method = methodFunc[self.method]
+        ps_0 = np.c_[self.micp.p_0_a, self.micp.p_0_b]
+        ps_cal_0 = np.c[self.micp.p_0_a[y_cal == 0], self.micp.p_0_b[y_cal == 0]
+        ps_1 = np.c_[self.micp.p_1_a, self.micp.p_1_b]
+        ps_cal_1 = np.c[self.micp.p_1_a[y_cal == 1], self.micp.p_1_b[y_cal == 1]
+
         with param.batch_watch(self):
-            self.p_comb_0 = comb_method(np.c_[self.micp.p_0_a, self.micp.p_0_b])
-            self.p_comb_1 = comb_method(np.c_[self.micp.p_1_a, self.micp.p_1_b])
+            self.p_comb_0 = comb_method(ps_0, ps_cal_0)
+        self.p_comb_1 = comb_method()
 
     def view_table(self):
         return cp_cm_widget(self.p_comb_0, self.p_comb_1,
@@ -630,10 +563,17 @@ class SimpleCombination(param.Parameterized):
         return f
 
 
-methodFunc = {"Mean": SimpleCombination.mean,
-              "Min": SimpleCombination.min,
-              "Fisher": SimpleCombination.fisher,
-              "Mean Q": SimpleCombination.min_q}
+methodFunc = {"Arithmetic Mean": comb_arithmetic,
+              "Arithmetic Mean (quantile)": comb_arithmetic_q,
+              "Arithmetic Mean (ECDF)": comb_arithmetic_ECDF,
+              "Geometric Mean": comb_geometric,
+              "Geometric Mean (quantile)": comb_geometric_q,
+              "Geometric Mean (ECDF)": comb_geometric_ECDF,
+              "Minimum": comb_minimum,
+              "Bonferroni": comb_bonferroni,
+              "Minimum (quantile)": comb_minimum_q,
+              "Minimum (ECDF)": comb_minimum_ECDF,
+              }
 
 sc = SimpleCombination(sd, micp)
 
@@ -712,7 +652,7 @@ def fisher(p):
     fs = -k / np.arange(1, p.shape[1]).reshape(1, -1)
     return np.sum(np.exp(
         k + np.cumsum(np.c_[np.zeros(shape=(p.shape[0])), np.log(fs)], axis=1)),
-                  axis=1)
+        axis=1)
 
 
 # %%
