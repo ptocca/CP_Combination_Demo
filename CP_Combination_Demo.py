@@ -228,23 +228,6 @@ def pValue_hist(p_0, p_1, y, pic_title=None,
 
 
 # %%
-def cp_cm_widget(p_0, p_1, y):
-    c_cm = cpConfusionMatrix_df(p_0, p_1, y).groupby('epsilon').agg('mean')
-    cw = 50
-    col_widths = {'epsilon': 50,
-                  "Positive predicted Positive": cw,
-                  "Positive predicted Negative": cw,
-                  "Negative predicted Negative": cw,
-                  "Negative predicted Positive": cw,
-                  "Positive predicted Empty": cw,
-                  "Negative predicted Empty": cw,
-                  "Positive predicted Uncertain": cw,
-                  "Negative predicted Uncertain": cw}
-    return pn.widgets.DataFrame(c_cm, fit_columns=False, widths=col_widths,
-                                disabled=True)
-
-
-# %%
 
 def ncm(scores, label):
     if label == 1:
@@ -327,8 +310,12 @@ class MICP(param.Parameterized):
     def view_p_plane(self):
         f = Figure(figsize=(18, 6))
         ax = f.add_subplot(1, 1, 1)
-        ax.plot(self.p_0_a, self.p_0_b, "g.", alpha=0.05);
-        ax.plot(self.p_1_a, self.p_1_b, "r.", alpha=0.05);
+        ax.plot(self.p_0_a, self.p_0_b, "g.", alpha=0.05, label="$p_0$")
+        ax.plot(self.p_1_a, self.p_1_b, "r.", alpha=0.05, label="$p_1$")
+        ax.set_xlabel("p-value for set 'a'")
+        ax.set_ylabel("p-value for set 'b'")
+        ax.legend()
+        ax.set_aspect(1.0)
         return f
 
 
@@ -347,8 +334,6 @@ micp = MICP(sd)
 
 # %%
 # micp_panel
-
-# %%
 
 # %%
 
@@ -417,12 +402,15 @@ import scipy.stats as ss
 def comb_geometric(ps, _=None):
     return ss.gmean(ps, axis=1)
 
+# %% [markdown]
+# ## Fisher combination
+
 # %%
-def fisher(p):
+def fisher(p, _=None):
     k = np.sum(np.log(p), axis=1).reshape(-1, 1)
     fs = -k / np.arange(1, p.shape[1]).reshape(1, -1)
     return np.sum(np.exp(
-        k + np.cumsum(np.c_[np.zeros(shape=(p.shape[1])), np.log(fs)], axis=1)),
+        k + np.cumsum(np.c_[np.zeros(shape=(p.shape[0])), np.log(fs)], axis=1)),
         axis=1)
 
 
@@ -495,13 +483,40 @@ methodFunc = {"Arithmetic Mean": comb_arithmetic,
               "Arithmetic Mean (quantile)": comb_arithmetic_q,
               "Arithmetic Mean (ECDF)": comb_arithmetic_ECDF,
               "Geometric Mean": comb_geometric,
-#              "Geometric Mean (quantile)": fisher, # comb_geometric_q,
+              "Geometric Mean (quantile)": fisher, # comb_geometric_q,
               "Geometric Mean (ECDF)": comb_geometric_ECDF,
               "Minimum": comb_minimum,
               "Bonferroni": comb_bonferroni,
               "Minimum (quantile)": comb_minimum_q,
               "Minimum (ECDF)": comb_minimum_ECDF,
               }
+
+
+# %%
+
+# %%
+def cp_cm_widget(p_0, p_1, y):
+    c_cm = cpConfusionMatrix_df(p_0, p_1, y).groupby('epsilon').agg('mean')
+    c_cm['Actual error rate'] = c_cm[["Positive predicted Negative","Negative predicted Positive",
+                                      "Positive predicted Empty","Negative predicted Empty"]].sum(axis=1) / c_cm.sum(axis=1)
+    c_cm['Avg set size'] = (c_cm[["Positive predicted Negative", "Negative predicted Positive", 
+                                  "Positive predicted Positive", "Negative predicted Negative"]].sum(axis=1) + \
+                           2*(c_cm[["Positive predicted Uncertain","Negative predicted Uncertain"]].sum(axis=1))) / c_cm.sum(axis=1)
+    cw = 50
+    col_widths = {'epsilon': 50,
+                  'Actual error rate': cw,
+                  'Avg set size': cw,
+                  "Positive predicted Positive": cw,
+                  "Positive predicted Negative": cw,
+                  "Negative predicted Negative": cw,
+                  "Negative predicted Positive": cw,
+                  "Positive predicted Empty": cw,
+                  "Negative predicted Empty": cw,
+                  "Positive predicted Uncertain": cw,
+                  "Negative predicted Uncertain": cw}
+#    return pn.widgets.DataFrame(c_cm, fit_columns=False, widths=col_widths,
+#                                disabled=True)
+    return pn.Pane(c_cm.to_html(notebook=True))
 
 
 # %%
@@ -532,7 +547,8 @@ class SimpleCombination(param.Parameterized):
         with param.batch_watch(self):
             self.p_comb_0 = comb_method(ps_0, ps_pcal_0)
             self.p_comb_1 = comb_method(ps_1, ps_pcal_1)
-
+    
+    @pn.depends("p_comb_0", "p_comb_1")
     def view_table(self):
         return cp_cm_widget(self.p_comb_0, self.p_comb_1,
                             self.sd.output['y_test'])
@@ -544,17 +560,17 @@ class SimpleCombination(param.Parameterized):
         ax.plot(*ecdf(self.p_comb_0[self.sd.output['y_test'] == 0]))
         ax.plot(*ecdf(self.p_comb_1[self.sd.output['y_test'] == 1]))
         ax.plot((0, 1), (0, 1), "k--")
+        ax.set_aspect(1.0)
+        ax.set_xlabel("Target error rate")
+        ax.set_ylabel("Actual error rate")
 
         return f
 
+        
 
 # %%
 sc = SimpleCombination(sd, micp)
 
-
-# %%
-
-# %%
 
 # %%
 
@@ -569,7 +585,7 @@ class App(param.Parameterized):
         self.micp = micp
         self.sc = sc
 
-    @pn.depends("fisher.p_comb_0", "fisher.p_comb_1")
+    @pn.depends("sc.p_comb_0", "sc.p_comb_1", watch=True)
     def view(self):
         return pn.Column(pn.Row(sd.param, sd.view),
                          pn.Row(micp.view_tables, micp.view_p_plane),
@@ -582,7 +598,6 @@ class App(param.Parameterized):
 app = App(sd, micp, sc)
 app.view()
 
-# %%
 
 # %%
 
@@ -590,40 +605,114 @@ app.view()
 # ss.pearsonr(p_0_a,p_0_b),ss.pearsonr(p_1_a,p_1_b)
 
 # %%
-c_cm = cpConfusionMatrix_df(fisher.p_comb_0, fisher.p_comb_1,
-                            sd.output['y_test']).groupby('epsilon').agg('mean')
-cw = 50
-col_widths = {'epsilon': 50,
-              "Positive predicted Positive": cw,
-              "Positive predicted Negative": cw,
-              "Negative predicted Negative": cw,
-              "Negative predicted Positive": cw,
-              "Positive predicted Empty": cw,
-              "Negative predicted Empty": cw,
-              "Positive predicted Uncertain": cw,
-              "Negative predicted Uncertain": cw}
-dfw = pn.widgets.DataFrame(c_cm, widths=col_widths, fit_columns=False,
-                           disabled=True)
-dfw.widths = col_widths
-dfw
 
 # %%
-dfw.width
+class MultiCombination(param.Parameterized):
+    sd = param.Parameter(precedence=-1)
+    micp = param.Parameter(precedence=-1)
+    p_comb_0 = param.Array(precedence=-1)
+    p_comb_1 = param.Array(precedence=-1)
+
+    methods_names = list(methodFunc.keys())
+    methods = param.ListSelector(default=[methods_names[0]],objects=methods_names)
+
+    def __init__(self, sd, micp, **params):
+        self.sd = sd
+        self.micp = micp
+        super().__init__(**params)
+        self.update()
+
+    @pn.depends("micp.p_0_a", "micp.p_1_a", "micp.p_0_b", "micp.p_1_b",
+                "methods", watch=True)
+    def update(self):
+        k = len(self.methods)
+        p_comb_0 = np.zeros(shape=(k, micp.p_0_a.shape[0]))
+        p_comb_1 = np.zeros(shape=(k, micp.p_0_a.shape[0]))
+        ps_0 = np.c_[self.micp.p_0_a, self.micp.p_0_b]
+        ps_1 = np.c_[self.micp.p_1_a, self.micp.p_1_b]
+        y_pcal = self.sd.output['y_pcal']
+        for i,m in enumerate(self.methods):
+            try:
+                comb_method = methodFunc[m]
+            except TypeError:
+                comb_method = methodFunc[m[0]]
+            ps_pcal_0 = np.c_[self.micp.p_0_a_cal[y_pcal == 0], self.micp.p_0_b_cal[y_pcal == 0]]
+            ps_pcal_1 = np.c_[self.micp.p_1_a_cal[y_pcal == 1], self.micp.p_1_b_cal[y_pcal == 1]]
+            p_comb_0[i] = comb_method(ps_0, ps_pcal_0)
+            p_comb_1[i] = comb_method(ps_1, ps_pcal_1)
+        with param.batch_watch(self):
+            self.p_comb_0 = p_comb_0
+            self.p_comb_1 = p_comb_1
+    
+    @pn.depends("p_comb_0", "p_comb_1")
+    def view_table(self):
+        return cp_cm_widget(self.p_comb_0, self.p_comb_1,
+                            self.sd.output['y_test'])
+
+    @pn.depends("p_comb_0", "p_comb_1")
+    def view_validity(self):
+        f = Figure(figsize=(12,12))
+        ax = f.add_subplot(2, 2, 1)
+        for i,m in enumerate(self.methods):
+            ax.plot(*ecdf(self.p_comb_0[i][self.sd.output['y_test'] == 0]), label=m)
+        ax.set_aspect(1.0)
+        ax.set_xlabel("Target error rate")
+        ax.set_ylabel("Actual error rate")
+        ax.legend()
+        ax.plot((0, 1), (0, 1), "k--")
+
+        ax = f.add_subplot(2, 2, 2)
+        for i,m in enumerate(self.methods):
+            ax.plot(*ecdf(self.p_comb_1[i][self.sd.output['y_test'] == 1]), label=m)
+        ax.set_aspect(1.0)
+        ax.set_xlabel("Target error rate")
+        ax.set_ylabel("Actual error rate")
+        ax.legend()
+        ax.plot((0, 1), (0, 1), "k--")
+        
+        ax = f.add_subplot(2, 2, 3)
+        for i,m in enumerate(self.methods):
+            ps = np.r_[self.p_comb_0[i],self.p_comb_1[i]]
+            x,c = ecdf(ps)
+                       
+            ax.plot(x,2*(1-c), label=m)
+        ax.set_xlabel("Target error rate")
+        ax.set_xlim(0,1)
+        ax.set_ylabel("Average set size")
+        ax.legend()
+        ax.grid()
+
+        
+        return f
+    
+mc = MultiCombination(sd, micp)
+
 
 # %%
-pn.Row(dfw.controls(jslink=True), dfw)
+class AppMulti(param.Parameterized):
+    sd = param.Parameter()
+    micp = param.Parameter()
+    mc = param.Parameter()
+
+    def __init__(self, sd, micp, mc, **params):
+        self.sd = sd
+        self.micp = micp
+        self.mc = mc
+
+    def view(self):
+        
+        custom_mc_widgets = pn.Param(self.mc.param, widgets={"methods": pn.widgets.CheckBoxGroup})
+        return pn.Column(pn.Row(self.sd.param, self.sd.view),
+                         pn.Row(self.micp.view_tables, self.micp.view_p_plane),
+                         pn.Row(custom_mc_widgets, self.mc.view_validity))
+
+
 
 # %%
-f, ax = plt.subplots()
-ax.plot(*ecdf(p_0_a_cal[y_cal == 0]))
-ax.plot(*ecdf(p_0_b_cal[y_cal == 0]))
-ax.plot(*ecdf(p_1_a_cal[y_cal == 1]))
-ax.plot(*ecdf(p_1_b_cal[y_cal == 1]))
-
-# %% [markdown]
-# ## Fisher combination
+am = AppMulti(sd,micp,mc)
 
 # %%
+am.view()
 
 # %%
 from sklearn.utils.multiclass import unique_labels
