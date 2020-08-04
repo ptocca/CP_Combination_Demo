@@ -89,10 +89,25 @@ class SynthDataSet(param.Parameterized):
 
         positives_number = int(self.N * self.percentage_of_positives / 100)
         negatives_number = self.N - positives_number
-        alpha_neg = ss.multivariate_normal(mean=[-1, -1], cov=cov).rvs(
-            size=(negatives_number,))
-        alpha_pos = ss.multivariate_normal(mean=[1, 1], cov=cov).rvs(
-            size=(positives_number,))
+        
+        try:
+            alpha_neg = ss.multivariate_normal(mean=[-1, -1], cov=cov).rvs(
+                size=(negatives_number,))
+            alpha_pos = ss.multivariate_normal(mean=[1, 1], cov=cov).rvs(
+                size=(positives_number,))
+        except:
+            placeholder = np.array([0.0])
+            output['scores_cal_a'] = placeholder
+            output['scores_pcal_a'] = placeholder
+            output['scores_cal_b'] = placeholder
+            output['scores_pcal_b'] = placeholder
+            output['y_cal'] = placeholder
+            output['y_pcal'] = placeholder
+            output['scores_test_a'] = placeholder
+            output['scores_test_b'] = placeholder
+            self.output = output
+            return
+            
 
         alpha_neg_a = alpha_neg[:, 0]
         alpha_neg_b = alpha_neg[:, 1]
@@ -595,8 +610,9 @@ class App(param.Parameterized):
 # %%
 
 # %%
-app = App(sd, micp, sc)
-app.view()
+if 0:
+    app = App(sd, micp, sc)
+    app.view()
 
 
 # %%
@@ -613,7 +629,7 @@ class MultiCombination(param.Parameterized):
     p_comb_0 = param.Array(precedence=-1)
     p_comb_1 = param.Array(precedence=-1)
 
-    methods_names = list(methodFunc.keys())
+    methods_names = ["Base A", "Base B",] +  list(methodFunc.keys())
     methods = param.ListSelector(default=[methods_names[0]],objects=methods_names)
 
     def __init__(self, sd, micp, **params):
@@ -632,6 +648,15 @@ class MultiCombination(param.Parameterized):
         ps_1 = np.c_[self.micp.p_1_a, self.micp.p_1_b]
         y_pcal = self.sd.output['y_pcal']
         for i,m in enumerate(self.methods):
+            if m=="Base A":
+                p_comb_0[i] = self.micp.p_0_a
+                p_comb_1[i] = self.micp.p_1_a
+                continue
+            elif m=="Base B":
+                p_comb_0[i] = self.micp.p_0_b
+                p_comb_1[i] = self.micp.p_1_b
+                continue
+            # If not a base CP, do the combination
             try:
                 comb_method = methodFunc[m]
             except TypeError:
@@ -678,8 +703,10 @@ class MultiCombination(param.Parameterized):
             ax.plot(x,2*(1-c), label=m)
         ax.set_xlabel("Target error rate")
         ax.set_xlim(0,1)
+        ax.set_ylim(0,2)
         ax.set_ylabel("Average set size")
         ax.legend()
+        ax.plot((0, 1), (1, 0), "k--")
         ax.grid()
 
         
@@ -712,40 +739,17 @@ class AppMulti(param.Parameterized):
 am = AppMulti(sd,micp,mc)
 
 # %%
-am.view()
+srv = am.view()
 
 # %%
-from sklearn.utils.multiclass import unique_labels
+srv.show()
+
+# %%
+srv.stop()
 
 
-def pValue_hist(p_0, p_1, y, pic_title=None, pic_filename=None,
-                labels_names=["Negative", "Positive"]):
-    u_l = unique_labels(y)
-    if len(u_l) != 2:
-        return
-
-    f, ax = plt.subplots(1, 2, figsize=(12, 6))
-
-    ax[0].hist((p_0[y == u_l[0]], p_0[y == u_l[1]]),
-               bins=np.linspace(0, 1, 101),
-               label=labels_names);
-    ax[0].set_title("$p_{%s}$" % str(u_l[0]), fontsize=14)
-    if not (labels_names is None):
-        ax[0].legend()
-
-    ax[1].hist((p_1[y == u_l[0]], p_1[y == u_l[1]]),
-               bins=np.linspace(0, 1, 101),
-               label=labels_names);
-    ax[1].set_title("$p_{%s}$" % str(u_l[1]), fontsize=14)
-    if not (labels_names is None):
-        ax[1].legend()
-
-    if not (pic_title is None):
-        f.suptitle("p-value histograms for %s" % pic_title, fontsize=16)
-
-    if not pic_filename is None:
-        f.savefig(pic_filename + "_pValHist.png", dpi=150)
-
+# %% [markdown]
+# # Neyman-Pearson
 
 # %%
 def BetaKDE(X, b):  # Unfortunately this is too slow in this implementation
@@ -755,6 +759,9 @@ def BetaKDE(X, b):  # Unfortunately this is too slow in this implementation
 
     return kde
 
+
+# %% [markdown]
+# ## Density estimation via histogram
 
 # %%
 def NeymanPearson(p_a, p_b, h0, test_p_a, test_p_b, pics_title_part):
@@ -834,23 +841,7 @@ p_0_npcomb = NeymanPearson(p_0_a_cal, p_0_b_cal, y_cal == 0, p_0_a, p_0_b,
 
 
 # %% [markdown]
-# # Spline approach
-
-# %%
-def splineEst(data, n_knots=25, s=0.2):
-    k = np.linspace(0, 1, n_knots + 1)
-    q = np.quantile(data, k, interpolation='lower')
-
-    # UnivariateSpline() below requires that the x be strictly increasing
-    # quantiles might be the same...
-
-    h, bins = np.histogram(data, bins=np.unique(q), density=True)
-
-    ss = UnivariateSpline(0.5 * (bins[:-1] + bins[1:]), h, k=3, s=s, ext=3)
-    return ss
-
-
-# %%
+# ## Density estimation via histogram smoothed with a spline
 
 # %%
 def splineEst(data, n_knots=20, s=0.3):
@@ -1002,10 +993,6 @@ c_cf_npde, precision_npde = cp_statistics(p_0_npde, p_1_npde, None, None,
 c_cf_npcomb, precision_npcomb = cp_statistics(p_0_npcomb, p_1_npcomb, None,
                                               None, y_test, "_npcomb",
                                               " Neyman-Pearson (Hist) Combination");
-
-# %%
-
-# %%
 
 # %%
 
