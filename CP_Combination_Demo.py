@@ -47,14 +47,24 @@ from CP import *
 def plot_score_hist(alpha_0_a, alpha_0_b, alpha_1_a, alpha_1_b):
     f = Figure(figsize=(18, 6))
     ax_a = f.add_subplot(1, 3, 1)
-    ax_a.hist([alpha_0_a, alpha_1_a], bins=np.linspace(-10, 10, 51))
-    ax_b = f.add_subplot(1, 3, 2, sharey=ax_a)
-    ax_b.hist([alpha_0_b, alpha_1_b], bins=np.linspace(-10, 10, 51))
+    ax_a.hist([alpha_0_a, alpha_1_a], bins=np.linspace(-10, 10, 51), label=("Negative","Positive"), color=("g","r"))
+    ax_a.set_title("Classifier A")
+    ax_a.legend()
+    ax_a.set_xlabel('"Score"')
 
+    ax_b = f.add_subplot(1, 3, 2, sharey=ax_a)
+    ax_b.hist([alpha_0_b, alpha_1_b], bins=np.linspace(-10, 10, 51), label=("Negative","Positive"), color=("g","r"))
+    ax_b.set_title("Classifier B")
+    ax_b.legend()
+    ax_b.set_xlabel('"Score"')
+ 
     ax_c = f.add_subplot(1, 3, 3)
-    ax_c.plot(alpha_0_a, alpha_0_b, "g.", alpha=0.05);
-    ax_c.plot(alpha_1_a, alpha_1_b, "r.", alpha=0.05);
-    f.suptitle("Histograms of simulated scores (blue and orange)\n",
+    ax_c.plot(alpha_0_a, alpha_0_b, "g.", alpha=0.05, label="Negative");
+    ax_c.plot(alpha_1_a, alpha_1_b, "r.", alpha=0.05, label="Positive");
+    ax_c.set_xlabel("Classifier A")
+    ax_c.set_ylabel("Classifier B")
+    ax_c.legend()
+    f.suptitle("Histograms of simulated scores\n",
                fontsize=16);
     return f
 
@@ -105,6 +115,7 @@ class SynthDataSet(param.Parameterized):
             output['y_pcal'] = placeholder
             output['scores_test_a'] = placeholder
             output['scores_test_b'] = placeholder
+            output['y_test'] = placeholder
             self.output = output
             return
             
@@ -165,9 +176,9 @@ def p_plane_plot(p_0, p_1, y, title_part, pics_title_part):
         return a
 
     f, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
-    ax1.plot(p_0[y == 0], p_1[y == 0], 'g.', label='Negative',
+    ax1.plot(p_0[y == 0], p_1[y == 0], label='Negative',
              alpha=alpha_y(y == 0));
-    ax2.plot(p_0[y == 1], p_1[y == 1], 'r.', label='Positive',
+    ax2.plot(p_0[y == 1], p_1[y == 1], label='Positive',
              alpha=alpha_y(y == 1));
     ax1.set_title("Inactives $(p_0,p_1)$ for " + title_part, fontsize=16)
     ax2.set_title("Actives $(p_0,p_1)$ for " + title_part, fontsize=16)
@@ -344,7 +355,6 @@ micp = MICP(sd)
 # %%
 # micp_panel = pn.Column(pn.Row(micp.sd.param, micp.sd.view),
 #                       micp.view)
-
 # %%
 
 # %%
@@ -433,7 +443,6 @@ def fisher(p, _=None):
 
 def comb_geometric_ECDF(ps, ps_cal):
     return ECDF_comb(comb_geometric, ps, ps_cal)
-
 # %%
 
 
@@ -683,6 +692,7 @@ class MultiCombination(param.Parameterized):
         ax.set_aspect(1.0)
         ax.set_xlabel("Target error rate")
         ax.set_ylabel("Actual error rate")
+        ax.set_title("Validity plot for combined $p_0$")
         ax.legend()
         ax.plot((0, 1), (0, 1), "k--")
 
@@ -692,6 +702,7 @@ class MultiCombination(param.Parameterized):
         ax.set_aspect(1.0)
         ax.set_xlabel("Target error rate")
         ax.set_ylabel("Actual error rate")
+        ax.set_title("Validity plot for combined $p_1$")
         ax.legend()
         ax.plot((0, 1), (0, 1), "k--")
         
@@ -705,11 +716,24 @@ class MultiCombination(param.Parameterized):
         ax.set_xlim(0,1)
         ax.set_ylim(0,2)
         ax.set_ylabel("Average set size")
+        ax.set_title("Combined CP efficiency")
         ax.legend()
         ax.plot((0, 1), (1, 0), "k--")
         ax.grid()
 
-        
+        ax = f.add_subplot(2, 2, 4)
+        for i,m in enumerate(self.methods):
+            ps = np.r_[self.p_comb_0[i],self.p_comb_1[i]]
+            x,c = ecdf(ps)
+                       
+            ax.plot(x,2*(1-c)-(1-x), label=m)
+        ax.set_xlabel("Target error rate")
+        ax.set_xlim(0,1)
+        ax.set_ylim(-1,1)
+        ax.set_ylabel("Delta from ideal")
+        ax.set_title("Combined CP efficiency (delta from ideal)")
+
+        ax.grid()
         return f
     
 mc = MultiCombination(sd, micp)
@@ -730,7 +754,7 @@ class AppMulti(param.Parameterized):
         
         custom_mc_widgets = pn.Param(self.mc.param, widgets={"methods": pn.widgets.CheckBoxGroup})
         return pn.Column(pn.Row(self.sd.param, self.sd.view),
-                         pn.Row(self.micp.view_tables, self.micp.view_p_plane),
+                         # pn.Row(self.micp.view_tables, self.micp.view_p_plane),
                          pn.Row(custom_mc_widgets, self.mc.view_validity))
 
 
@@ -739,10 +763,10 @@ class AppMulti(param.Parameterized):
 am = AppMulti(sd,micp,mc)
 
 # %%
-srv = am.view()
+ui = am.view()
 
 # %%
-srv.show()
+srv = ui.show()
 
 # %%
 srv.stop()
