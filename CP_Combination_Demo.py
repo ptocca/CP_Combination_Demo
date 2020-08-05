@@ -105,7 +105,7 @@ class SynthDataSet(param.Parameterized):
                 size=(negatives_number,))
             alpha_pos = ss.multivariate_normal(mean=[1, 1], cov=cov).rvs(
                 size=(positives_number,))
-        except:
+        except numpy.linalg.LinAlgError:
             placeholder = np.array([0.0])
             output['scores_cal_a'] = placeholder
             output['scores_pcal_a'] = placeholder
