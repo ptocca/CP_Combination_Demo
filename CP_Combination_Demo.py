@@ -45,7 +45,7 @@ from CP import *
 
 # %%
 def plot_score_hist(alpha_0_a, alpha_0_b, alpha_1_a, alpha_1_b):
-    f = Figure(figsize=(18, 6))
+    f = Figure(figsize=(12, 4))
     ax_a = f.add_subplot(1, 3, 1)
     ax_a.hist([alpha_0_a, alpha_1_a], bins=np.linspace(-10, 10, 51), label=("Negative","Positive"), color=("g","r"))
     ax_a.set_title("Classifier A")
@@ -73,11 +73,8 @@ class SynthDataSet(param.Parameterized):
     N = param.Integer(default=2000, bounds=(100, 10000))
     percentage_of_positives = param.Number(default=50.0, bounds=(0.1, 100.0))
     seed = param.Integer(default=0, bounds=(0, 32767))
-    cc = param.Number(default=0.0, bounds=(-1.0, 1.0))
-    var = param.Number(default=1.0, bounds=(0.5, 2.0))
-
-    micp_calibration_fraction = param.Number(default=0.5, bounds=(0.01, 0.5))
-    comb_calibration_fraction = param.Number(default=0.3, bounds=(0.01, 0.5))
+    cc = param.Number(default=0.0, bounds=(-0.99, 0.99))
+    var = param.Number(default=1.0, bounds=(0.5, 4.0))
 
     # Outputs
     output = param.Dict(default=dict(),
@@ -86,6 +83,8 @@ class SynthDataSet(param.Parameterized):
     n = 2
 
     def __init__(self, **params):
+        self.micp_calibration_fraction = 0.5
+        self.comb_calibration_fraction = 0.3        
         super(SynthDataSet, self).__init__(**params)
         self.update()
 
@@ -105,8 +104,8 @@ class SynthDataSet(param.Parameterized):
                 size=(negatives_number,))
             alpha_pos = ss.multivariate_normal(mean=[1, 1], cov=cov).rvs(
                 size=(positives_number,))
-        except numpy.linalg.LinAlgError:
-            placeholder = np.array([0.0])
+        except np.linalg.LinAlgError:
+            placeholder = np.array([0.0, 1.0])
             output['scores_cal_a'] = placeholder
             output['scores_pcal_a'] = placeholder
             output['scores_cal_b'] = placeholder
@@ -147,8 +146,7 @@ class SynthDataSet(param.Parameterized):
 
         self.output = output
 
-    @pn.depends("N", "percentage_of_positives", "seed", "cc", "var",
-                "micp_calibration_fraction", "comb_calibration_fraction")
+    @pn.depends("N", "percentage_of_positives", "seed", "cc", "var")
     def view(self):
         self.update()
         f = plot_score_hist(
@@ -385,6 +383,9 @@ def KolmogorovAveraging(p_vals, phi, phi_inv):
 def comb_arithmetic(ps, _=None):
     return np.mean(ps, axis=1)
 
+def comb_arithmetic_conservative(ps, _=None):
+    return np.clip(2*np.mean(ps, axis=1), a_min=0.0, a_max=1.0)
+
 def comb_arithmetic_ECDF(ps, ps_cal):
     return ECDF_comb(comb_arithmetic, ps, ps_cal)
 
@@ -426,6 +427,10 @@ import scipy.stats as ss
 # %%
 def comb_geometric(ps, _=None):
     return ss.gmean(ps, axis=1)
+
+# %%
+def comb_geometric_conservative(ps, _=None):
+    return np.clip(np.e*ss.gmean(ps, axis=1), a_min=0.0, a_max=1.0)
 
 # %% [markdown]
 # ## Fisher combination
@@ -504,11 +509,15 @@ def comb_bonferroni_q(ps, _=None):
 
 # %%
 methodFunc = {"Arithmetic Mean": comb_arithmetic,
+              "Arithmetic Mean (conservative)": comb_arithmetic_conservative,
               "Arithmetic Mean (quantile)": comb_arithmetic_q,
               "Arithmetic Mean (ECDF)": comb_arithmetic_ECDF,
+              
               "Geometric Mean": comb_geometric,
+              "Geometric Mean (conservative)": comb_geometric_conservative,
               "Geometric Mean (quantile)": fisher, # comb_geometric_q,
               "Geometric Mean (ECDF)": comb_geometric_ECDF,
+              
               "Minimum": comb_minimum,
               "Bonferroni": comb_bonferroni,
               "Minimum (quantile)": comb_minimum_q,
@@ -631,6 +640,15 @@ if 0:
 
 # %%
 
+from bokeh.plotting import figure
+from bokeh.layouts import gridplot
+from bokeh.palettes import brewer
+from bokeh.models import ColumnDataSource, HoverTool
+
+# %%
+def ColorCycler(i):
+    return brewer['Dark2'][8][i%8]
+
 # %%
 class MultiCombination(param.Parameterized):
     sd = param.Parameter(precedence=-1)
@@ -639,7 +657,7 @@ class MultiCombination(param.Parameterized):
     p_comb_1 = param.Array(precedence=-1)
 
     methods_names = ["Base A", "Base B",] +  list(methodFunc.keys())
-    methods = param.ListSelector(default=[methods_names[0]],objects=methods_names)
+    methods = param.ListSelector(default=[methods_names[0], methods_names[1]],objects=methods_names)
 
     def __init__(self, sd, micp, **params):
         self.sd = sd
@@ -685,56 +703,78 @@ class MultiCombination(param.Parameterized):
 
     @pn.depends("p_comb_0", "p_comb_1")
     def view_validity(self):
-        f = Figure(figsize=(12,12))
-        ax = f.add_subplot(2, 2, 1)
-        for i,m in enumerate(self.methods):
-            ax.plot(*ecdf(self.p_comb_0[i][self.sd.output['y_test'] == 0]), label=m)
-        ax.set_aspect(1.0)
-        ax.set_xlabel("Target error rate")
-        ax.set_ylabel("Actual error rate")
-        ax.set_title("Validity plot for combined $p_0$")
-        ax.legend()
-        ax.plot((0, 1), (0, 1), "k--")
+        p_w = 300
+        p_h = 300
+        ax_v_0 = figure(title="Validity plot for combined $p_0$", plot_width=p_w, plot_height=p_h)
 
-        ax = f.add_subplot(2, 2, 2)
         for i,m in enumerate(self.methods):
-            ax.plot(*ecdf(self.p_comb_1[i][self.sd.output['y_test'] == 1]), label=m)
-        ax.set_aspect(1.0)
-        ax.set_xlabel("Target error rate")
-        ax.set_ylabel("Actual error rate")
-        ax.set_title("Validity plot for combined $p_1$")
-        ax.legend()
-        ax.plot((0, 1), (0, 1), "k--")
+            x,y = ecdf(self.p_comb_0[i][self.sd.output['y_test'] == 0])
+            ax_v_0.line(x=x, y=y, legend_label=m, color=ColorCycler(i), line_width=2)
+        ax_v_0.legend.location = 'top_left'
+        ax_v_0.xaxis.axis_label = "Target error rate"
+        ax_v_0.yaxis.axis_label = "Actual error rate"
+        ax_v_0.xaxis.bounds = (0,1)
+        ax_v_0.yaxis.bounds = (0,1)
+
+        ax_v_1 = figure(title="Validity plot for combined $p_1$", plot_width=p_w, plot_height=p_h)
+        for i,m in enumerate(self.methods):
+            x,y = ecdf(self.p_comb_1[i][self.sd.output['y_test'] == 1])
+            ax_v_1.line(x, y, legend_label=m, color=ColorCycler(i), line_width=2)
+        ax_v_1.legend.location = 'top_left'
+
+        ax_v_1.xaxis.axis_label = "Target error rate"
+        ax_v_1.yaxis.axis_label = "Actual error rate"
+        ax_v_1.xaxis.bounds = (0,1)
+        ax_v_1.yaxis.bounds = (0,1)
+
+        ax_v_1.line(x=(0,1), y=(0,1), line_color="black", name='Ideal', line_dash="dashed")
         
-        ax = f.add_subplot(2, 2, 3)
+        tooltips = [("Significance level","@x")]
+        ax_eff = figure(title="Efficiency of combined CP", tools="box_zoom,reset", tooltips=tooltips, plot_width=p_w, plot_height=p_h)
+        
+        cds_df = pd.DataFrame(columns=['x'])
+        for i,m in enumerate(self.methods):
+            ps = np.r_[self.p_comb_0[i],self.p_comb_1[i]]
+            x,c = ecdf(ps)                                    ### Remind me why this is right
+            # To compute the average set size as a function of the significance, we need to find
+            # the fraction of p0 and p1 are greater than the significance
+            # The ECDF is 1 minus this fraction.
+            # We could compute separately the ECDF for p0 and p1 and then we sum them.
+            # We can also compute the ECDF of the union of the p0 and p1
+            cds_df = pd.merge_ordered(cds_df, pd.DataFrame({'x':x, m:2*(1-c)}), how='outer', fill_method='ffill', on='x')
+        
+            tooltips.append((m,"@{%s}"%m))
+        
+        for i,m in enumerate(self.methods):        
+            ax_eff.line(x='x', y='%s'%m, source=cds_df, legend_label=m, color=ColorCycler(i), line_width=2)
+            
+        ax_eff.add_tools(HoverTool(mode='vline', tooltips=tooltips, names=self.methods, line_policy='nearest'))
+        
+        
+            
+        ax_eff.xaxis.axis_label = "Target error rate"
+        ax_eff.yaxis.axis_label = "Average prediction set size"
+        ax_eff.xaxis.bounds = (0,1)
+        ax_eff.yaxis.bounds = (0,2)
+        ax_eff.line(x=(0,1), y=(1,0), line_color="black", name='Ideal', line_dash="dashed")
+        
+
+        ax_eff_d = figure(title="Delta from ideal efficiency", plot_width=p_w, plot_height=p_h)
         for i,m in enumerate(self.methods):
             ps = np.r_[self.p_comb_0[i],self.p_comb_1[i]]
             x,c = ecdf(ps)
                        
-            ax.plot(x,2*(1-c), label=m)
-        ax.set_xlabel("Target error rate")
-        ax.set_xlim(0,1)
-        ax.set_ylim(0,2)
-        ax.set_ylabel("Average set size")
-        ax.set_title("Combined CP efficiency")
-        ax.legend()
-        ax.plot((0, 1), (1, 0), "k--")
-        ax.grid()
+            ax_eff_d.line(x=x,y=2*(1-c)-(1-x), legend_label=m, color=ColorCycler(i), line_width=2)
+        # ax.set_xlabel("Target error rate")
+        # ax.set_xlim(0,1)
+        # ax.set_ylim(-1,1)
+        # ax.set_ylabel("Delta from ideal")
+        # ax.set_title("Combined CP efficiency (delta from ideal)")
 
-        ax = f.add_subplot(2, 2, 4)
-        for i,m in enumerate(self.methods):
-            ps = np.r_[self.p_comb_0[i],self.p_comb_1[i]]
-            x,c = ecdf(ps)
-                       
-            ax.plot(x,2*(1-c)-(1-x), label=m)
-        ax.set_xlabel("Target error rate")
-        ax.set_xlim(0,1)
-        ax.set_ylim(-1,1)
-        ax.set_ylabel("Delta from ideal")
-        ax.set_title("Combined CP efficiency (delta from ideal)")
+        # ax.grid()
 
-        ax.grid()
-        return f
+        return gridplot([[ax_v_0, ax_v_1],
+                         [ax_eff, ax_eff_d]])
     
 mc = MultiCombination(sd, micp)
 
@@ -759,11 +799,11 @@ class AppMulti(param.Parameterized):
 
     def update_UI(self, event):
         ui = []
-        if "Synthetic Dataset" in event.value:
+        if "Synthetic Dataset" in event.new:
             ui.append(self.sd_view)
-        elif "Base CPs" in event.value:
+        if "Base CPs" in event.new:
             ui.append(self.micp_view)
-        elif "Combination" in event.value:
+        if "Combination" in event.new:
             ui.append(self.comb_view)
 
         self.ui[1] = pn.Column(*ui)
@@ -771,7 +811,7 @@ class AppMulti(param.Parameterized):
     def create_ui(self):
         ui_components_names = ["Synthetic Dataset", "Base CPs", "Combination"]
         self.ui_elem_selector = pn.widgets.CheckBoxGroup(
-            value=[ui_components_names[0]], options=ui_components_names)
+            value=[ui_components_names[0], ui_components_names[2]], options=ui_components_names)
         custom_mc_widgets = pn.Param(self.mc.param, widgets={
                                      "methods": pn.widgets.CheckBoxGroup})
         self.sd_view = pn.Row(self.sd.param, self.sd.view)
@@ -797,887 +837,4 @@ ui = am.view()
 srv = ui.show()
 
 # %%
-srv.stop()
-
-
-# %% [markdown]
-# # Neyman-Pearson
-
-# %%
-def BetaKDE(X, b):  # Unfortunately this is too slow in this implementation
-    def kde(x):
-        return sum(
-            ss.beta(x / b + 1, (1 - x) / b + 1).pdf(x_i) for x_i in X) / len(X)
-
-    return kde
-
-
-# %% [markdown]
-# ## Density estimation via histogram
-
-# %%
-def NeymanPearson(p_a, p_b, h0, test_p_a, test_p_b, pics_title_part):
-    n_bins = 1000
-    min_h1_lh = 0.0001
-
-    f = plt.figure(figsize=(22, 5))
-
-    ax = f.add_subplot(2, 4, 1)
-    h, bins, _ = ax.hist([p_a[h0], p_a[~h0]],
-                         bins=np.linspace(0, 1, n_bins + 1))
-    ax.set_title("Histogram of p-values (a)")
-
-    safe_h1 = np.where(h[1] == 0, min_h1_lh, h[1])
-    lmbd_a = h[0] / safe_h1
-    ax = f.add_subplot(2, 4, 2)
-    ax.plot(bins[:-1], lmbd_a)
-    ax.set_title("Lambda (a)")
-
-    lmbd_a_interp = UnivariateSpline(
-        np.concatenate(([0], 0.5 * (bins[1] - bins[0]) + bins[:-1])),
-        np.concatenate(([0], lmbd_a)), k=1, s=0, ext=3)
-    ax = f.add_subplot(2, 4, 3)
-    ax.plot(np.linspace(0, 0.5, 101), lmbd_a_interp(np.linspace(0, 0.5, 101)))
-    ax.set_title("Lambda (a) for p-values in [0,0.5]")
-
-    ax = f.add_subplot(2, 4, 5)
-    h, bins, _ = ax.hist([p_b[h0], p_b[~h0]],
-                         bins=np.linspace(0, 1, n_bins + 1))
-    ax.set_title("Histogram of p-values (b)")
-
-    safe_h1 = np.where(h[1] == 0, min_h1_lh, h[1])
-    lmbd_b = h[0] / safe_h1
-
-    ax = f.add_subplot(2, 4, 6)
-    ax.plot(bins[:-1], lmbd_b)
-    ax.set_title("Lambda (b)")
-
-    lmbd_b_interp = UnivariateSpline(
-        np.concatenate(([0], 0.5 * (bins[1] - bins[0]) + bins[:-1])),
-        # Let's add the origin and let's assume the middle of the bin
-        np.concatenate(([0], lmbd_b)), k=1, s=0, ext=3)
-    ax = f.add_subplot(2, 4, 7)
-    ax.plot(np.linspace(0, 0.5, 101), lmbd_b_interp(np.linspace(0, 0.5, 101)));
-    ax.set_title("Lambda (b) for p-values in [0,0.5]")
-
-    lmbd_comb = lmbd_a_interp(p_a) * lmbd_b_interp(p_b)
-
-    v, q = ecdf(lmbd_comb[h0])
-
-    NP_calibr = UnivariateSpline(v, q, k=1, s=0, ext=3)
-
-    lmbd_comb_test = lmbd_a_interp(test_p_a) * lmbd_b_interp(test_p_b)
-
-    p_npcomb = NP_calibr(lmbd_comb_test)
-
-    ax = f.add_subplot(1, 4, 4)
-    xx, yy = np.meshgrid(np.linspace(0, 1, 100), np.linspace(0, 1, 100))
-    zz = NP_calibr(
-        lmbd_a_interp(xx.ravel()) * lmbd_b_interp(yy.ravel())).reshape(xx.shape)
-
-    ax.contourf(xx, yy, zz);
-    ax.set_title("Combination of p-values")
-    ax.set_xlabel("p (a)")
-    ax.set_ylabel("p (b)")
-
-    f.tight_layout()
-
-    f.savefig(pics_base_name + pics_title_part + "_npcomb.png", dpi=300)
-
-    return p_npcomb
-
-
-# %%
-p_0_npcomb = NeymanPearson(p_0_a_cal, p_0_b_cal, y_cal == 0, p_0_a, p_0_b,
-                           pics_title_part="_0")
-
-
-# %% [markdown]
-# ## Density estimation via histogram smoothed with a spline
-
-# %%
-def splineEst(data, n_knots=20, s=0.3):
-    k = np.linspace(0, 1, n_knots + 1)
-
-    # UnivariateSpline() below requires that the x be strictly increasing
-    # quantiles might be the same...
-
-    h, bins = np.histogram(data, bins=n_knots, density=True)
-
-    ss = UnivariateSpline(0.5 * (bins[:-1] + bins[1:]), h, k=3, s=s, ext=3)
-    return ss
-
-
-# %%
-def NeymanPearsonDE(p_a, p_b, h0, p_a_test, p_b_test, pics_title_part,
-                    densityEstimator=splineEst):
-    f = plt.figure(figsize=(22, 5))
-
-    p_a_h0 = p_a[h0]
-
-    kde = densityEstimator(p_a_h0)
-    l_h0 = kde(p_a)
-
-    p_a_h1 = p_a[~h0]
-
-    kde = densityEstimator(p_a_h1)
-    l_h1 = kde(p_a)
-
-    lmbd_a = l_h0 / l_h1
-
-    # lmbd_a = np.clip(lmbd_a,1e-10,1e+10)
-    ax = f.add_subplot(2, 3, 1)
-
-    ax.plot(p_a, l_h0, "r.", label="Null")
-    ax.plot(p_a, l_h1, "b.", label="Alternate")
-    ax.set_title('Likelihoods (a)')
-
-    ax = f.add_subplot(2, 3, 2)
-    ax.plot(p_a, lmbd_a, "g.")
-    ax.set_title('Lambda (a)')
-
-    p_a_u, i_u = np.unique(p_a, return_index=True)
-    lmbd_a_int = UnivariateSpline(p_a_u, lmbd_a[i_u], k=1, s=0, ext=3)
-
-    ########################################################################################
-
-    # Now compute lambda for p_b
-
-    p_b_h0 = p_b[h0]
-
-    kde = densityEstimator(p_b_h0)
-    l_h0 = kde(p_b)
-
-    p_b_h1 = p_b[~h0]
-
-    kde = densityEstimator(p_b_h1)
-    l_h1 = kde(p_b)
-
-    lmbd_b = l_h0 / l_h1
-
-    # lmbd_a = np.clip(lmbd_a,1e-10,1e+10)
-    ax = f.add_subplot(2, 3, 4)
-
-    ax.plot(p_b, l_h0, "r.", label="Null")
-    ax.plot(p_b, l_h1, "b.", label="Alternate")
-    ax.set_xlabel("p value")
-    ax.set_title('Likelihoods (b)')
-
-    ax = f.add_subplot(2, 3, 5)
-
-    ax.plot(p_b, lmbd_b, "g.")
-    ax.set_title('Lambda (b)')
-    ax.set_xlabel("p value")
-
-    p_b_u, i_u = np.unique(p_b, return_index=True)
-    lmbd_b_int = UnivariateSpline(p_b_u, lmbd_b[i_u], k=1, s=0, ext=3)
-
-    ######################################################################
-    # Combine the lambdas assuming independence
-    # lmbd_comb = lmbd_a_interp(p_a)*lmbd_b_interp(p_b)
-    lmbd_comb = lmbd_a * lmbd_b
-
-    # lmbd_comb_interp = UnivariateSpline(eval_points,lmbd_comb,k=1,s=0,ext=3)
-
-    v, q = ecdf(lmbd_comb[h0])
-
-    NP_calibr = UnivariateSpline(v, q, k=1, s=0, ext=3)
-
-    # This can take a while
-    p_npcomb = NP_calibr(lmbd_a_int(p_a_test) * lmbd_b_int(p_b_test))
-
-    ax = f.add_subplot(1, 3, 3)
-    xx, yy = np.meshgrid(np.linspace(0, 1, 100), np.linspace(0, 1, 100))
-    zz = NP_calibr(lmbd_a_int(xx.ravel()) * lmbd_b_int(yy.ravel())).reshape(
-        xx.shape)
-
-    ax.contourf(xx, yy, zz);
-    ax.set_title("Combination of p-values")
-    ax.set_xlabel("p (a)")
-    ax.set_ylabel("p (b)")
-    ax.set_aspect(1)
-
-    f.tight_layout()
-
-    f.savefig(pics_base_name + pics_title_part + "_npde.png", dpi=300)
-
-    return p_npcomb
-
-
-# %%
-p_0_npde = NeymanPearsonDE(p_0_a_cal, p_0_b_cal, y_cal == 0, p_0_a, p_0_b,
-                           pics_title_part="_0")
-
-
-# %%
-def plot_diag_pVals(p_vals, descs, h0, pics_title_part):
-    n_bins = 200
-    bins = np.linspace(0, 1, n_bins + 1)
-    f, axs = plt.subplots(len(p_vals), 1, figsize=(15, 5 * len(p_vals)))
-
-    for ax, p, d in zip(axs, p_vals, descs):
-        ax.hist([p[h0], p[~h0]], bins=bins, density=True)
-        ax.set_xlabel("$p_{%s}$" % d, fontsize=14)
-
-    f.suptitle("Histograms of p" + pics_title_part + " values", fontsize=18,
-               y=1.02)
-    f.tight_layout()
-
-    f.savefig(pics_title_part + "_hists.png", dpi=150);
-
-
-# %%
-p_1_npcomb = NeymanPearson(p_1_a_cal, p_1_b_cal, y_cal == 1, p_1_a, p_1_b,
-                           pics_title_part='_1')
-
-# %%
-
-# %%
-p_1_npde = NeymanPearsonDE(p_1_a_cal, p_1_b_cal, y_cal == 1, p_1_a, p_1_b,
-                           pics_title_part='_1')
-
-# %%
-c_cf_npde, precision_npde = cp_statistics(p_0_npde, p_1_npde, None, None,
-                                          y_test, "_npde",
-                                          " Neyman-Pearson (Spline) Combination");
-
-# %%
-c_cf_npcomb, precision_npcomb = cp_statistics(p_0_npcomb, p_1_npcomb, None,
-                                              None, y_test, "_npcomb",
-                                              " Neyman-Pearson (Hist) Combination");
-
-# %%
-
-# %% [markdown]
-# # V-Matrix Density Ratio Approach
-
-# %%
-from sklearn.externals.joblib import Memory
-
-mem = Memory(location='.', verbose=0)
-
-# %%
-mem.clear()
-
-# %%
-import sklearn
-
-cached_rbf_kernel = mem.cache(sklearn.metrics.pairwise.rbf_kernel)
-
-
-class rbf_krnl(object):
-    def __init__(self, gamma):
-        self.gamma = gamma
-
-    def __call__(self, X, Y=None):
-        return cached_rbf_kernel(X, Y, gamma=self.gamma)
-
-    def __repr__(self):
-        return "RBF Gaussian gamma: " + str(self.gamma)
-
-
-cached_polynomial_kernel = mem.cache(sklearn.metrics.pairwise.polynomial_kernel)
-
-
-class poly_krnl(object):
-    def __init__(self, gamma):
-        self.gamma = gamma
-
-    def __call__(self, X, Y=None):
-        return cached_polynomial_kernel(X, Y, gamma=self.gamma, coef0=1)
-
-    def __repr__(self):
-        return "Polynomial deg 3 kernel gamma: " + str(self.gamma)
-
-
-class poly_krnl_2(object):
-    def __init__(self, gamma):
-        self.gamma = gamma
-
-    def __call__(self, X, Y=None):
-        return cached_polynomial_kernel(X, Y, degree=2, gamma=self.gamma,
-                                        coef0=1e-6)  # I use a homogeneous polynomial kernel
-
-    def __repr__(self):
-        return "Polynomial deg 2 kernel gamma: " + str(self.gamma)
-
-
-class poly_krnl_inv(object):
-    def __init__(self, gamma):
-        self.gamma = gamma
-
-    def __call__(self, X, Y=None):
-        return cached_polynomial_kernel(X, Y, degree=-1, gamma=self.gamma,
-                                        coef0=0.5)
-
-    def __repr__(self):
-        return "Polynomial deg -1 kernel gamma: " + str(self.gamma)
-
-
-# %%
-def INK_Spline_Linear(x, y, gamma):
-    x = np.atleast_2d(x) * gamma
-    y = np.atleast_2d(y) * gamma
-    min_v = np.min(np.stack((x, y)), axis=0)
-
-    k_p = 1 + x * y + 0.5 * np.abs(
-        x - y) * min_v * min_v + min_v * min_v * min_v / 3
-
-    return np.prod(k_p, axis=1)
-
-
-def INK_Spline_Linear_Normed(x, y, gamma):
-    """Computes the Linear INK-Spline Kernel
-    x,y: 2-d arrays, n samples by p features
-    Returns: """
-    return INK_Spline_Linear(x, y, gamma) / np.sqrt(
-        INK_Spline_Linear(x, x, gamma) * INK_Spline_Linear(y, y, gamma))
-
-
-from sklearn.metrics import pairwise_kernels
-
-
-class ink_lin_krnl(object):
-    """
-    Linear INK-Spline Kernel
-    Assumes that the domain is [0,+inf]"""
-
-    def __init__(self, gamma):
-        self.gamma = gamma
-
-    def __call__(self, X, Y=None):
-        if Y is None:
-            Y = X
-        idxs = np.mgrid[slice(0, X.shape[0]), slice(0, Y.shape[0])]
-        res = INK_Spline_Linear_Normed(X[idxs[0].ravel()],
-                                       Y[idxs[1].ravel()], self.gamma).reshape(
-            X.shape[0], Y.shape[0])
-        return res
-
-    def __repr__(self):
-        return "Linear INK-spline kernel (on [0,1])"
-
-
-# %%
-
-# %%
-def v_mat_star_eye(X, X_prime, dummy):
-    return np.eye(X.shape[0])
-
-
-# %%
-
-# %%
-from numba import jit, prange, njit
-
-
-# %% [markdown]
-# In "V-Matrix Method of Solving Statistical Inference Problems" (Vapnik and Izmailov), the V matrix is expressed as:
-#
-# $$
-# V_{i,j} = \prod_{k=1}^d \int \theta(x^{(k)}-X_i^{(k)})\,\theta(x^{(k)}-X_j^{(k)}) \sigma_k(x^{(k)}) d\mu(x^{(k)})
-# $$
-#
-#
-# If $\sigma(x^{(k)}) = 1$ and $d\mu(x^{(k)}) = \prod_{k=1}^d dF_\ell(x^{(k)})$ 
-# $$
-# V_{i,j} = \prod_{k=1}^d \nu\left(X^{(k)} > \max\left\lbrace X_i^{(k)},X_j^{(k)}\right\rbrace\right)
-# $$
-#
-# However, the following is recommended for density ratio estimation
-#
-# $$
-# \sigma(x_k) = \frac{1}{F_{num}(x_k)(1-F_{num}(x_k))+\epsilon}
-# $$
-#
-# It's not clear to me why we'd be looking only at the ECDF of the numerator. Why not all the data?
-#
-# In any case, how do we calculate the $V_{i,j}$?
-
-# %% [markdown]
-# I would say that the integral can be approximated with a sum:
-#
-# $$
-# \frac{1}{\ell}\sum_{x_k > \left\lbrace X_i^{(k)},X_j^{(k)}\right\rbrace} \sigma(x_k)
-# $$
-#
-# where the $x_k$ are taken from all the data (??)
-
-# %%
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])')
-def v_mat_sigma_eye(X, X_prime, data):
-    data_sorted = np.sort(data, axis=0)
-    data_l = data.shape[0]
-
-    v = np.zeros(shape=(X.shape[0], X_prime.shape[0]))
-    for i in prange(X.shape[0]):
-        for j in range(X_prime.shape[0]):
-            acc = 1
-            for k in range(X.shape[1]):
-                # Let's compute the frequency of data with values larger than those for X_i and X^'_j
-                f = (data_l - np.searchsorted(data_sorted[:, k],
-                                              max(X[i, k], X_prime[j, k]),
-                                              side="right")) / data_l
-                acc *= f
-            v[i, j] = acc
-    return v
-
-
-# %%
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', nopython=True,
-     parallel=True, nogil=True)
-def v_mat_max(X, X_prime, dummy):
-    v = np.zeros(shape=(X.shape[0], X_prime.shape[0]))
-    for i in prange(X.shape[0]):
-        for j in range(X_prime.shape[0]):
-            acc = 1
-            for k in range(X.shape[1]):
-                acc *= 1 - max(X[i, k], X_prime[j, k])
-            v[i, j] = acc
-    return v
-
-
-# %%
-
-# %%
-# This takes forever... 
-
-
-# @mem.cache
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', parallel=True,
-     nogil=True)
-def v_mat_sigma_ratio(X, X_prime, data):
-    data_sorted = np.sort(data, 0)
-    data_l = data.shape[0]
-    eps = 1 / (data_l * data_l)  # Just an idea...
-    v = np.zeros(shape=(X.shape[0], X_prime.shape[0]))
-
-    for i in prange(X.shape[0]):
-        for j in range(X_prime.shape[0]):
-            accu = 1
-            for k in range(X.shape[1]):
-                dd = data_sorted[:, k]
-                s = 0
-                for l in data[:, k]:
-                    if l > X[i, k] and l > X_prime[j, k]:
-                        f = (np.searchsorted(dd, l, side="right")) / data_l
-                        s += 1 / (f * (1 - f) + eps)
-                accu *= (s / data_l)
-            v[i, j] = accu
-    return v
-
-
-# %% [markdown]
-# ### Experimental V-matrices
-
-# %%
-from statsmodels.distributions.empirical_distribution import ECDF
-
-
-# %%
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', parallel=True,
-     nogil=True)
-def v_mat_star_sigma_ratio_approx(X, X_prime, data):
-    data_sorted = np.sort(data, 0)
-    data_l = data.shape[0]
-    eps = 1 / (data_l)  # Just an idea...
-    v = np.zeros(shape=(X.shape[0], X_prime.shape[0]))
-
-    for i in prange(X.shape[0]):
-        for j in range(X_prime.shape[0]):
-            accu = 1
-            for k in range(X.shape[1]):
-                dd = data_sorted[:, k]
-                f = (data_l - np.searchsorted(dd, np.maximum(X[i, k],
-                                                             X_prime[j, k]),
-                                              side="right")) / data_l
-                f1 = (np.searchsorted(dd, X[i, k], side="right")) / data_l
-                f2 = (np.searchsorted(dd, X_prime[j, k], side="right")) / data_l
-                accu *= f / (f1 * f2 * (1 - f2) * (1 - f1) + eps)
-            v[i, j] = accu
-    return v / np.max(v)
-
-
-# %%
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', parallel=True,
-     nogil=True)
-def v_mat_star_sigma_oneside_approx(X, X_prime, data):
-    data_sorted = np.sort(data, 0)
-    data_l = data.shape[0]
-    eps = 1 / (data_l)  # Just an idea...
-    v = np.zeros(shape=(X.shape[0], X_prime.shape[0]))
-
-    for i in prange(X.shape[0]):
-        for j in range(X_prime.shape[0]):
-            accu = 1
-            for k in range(X.shape[1]):
-                dd = data_sorted[:, k]
-                f = (data_l - np.searchsorted(dd, np.maximum(X[i, k],
-                                                             X_prime[j, k]),
-                                              side="right")) / data_l
-                f1 = (np.searchsorted(dd, X[i, k], side="right")) / data_l
-                f2 = (np.searchsorted(dd, X_prime[j, k], side="right")) / data_l
-                accu *= f / ((1 - f1) * (1 - f2) + eps)
-            v[i, j] = accu
-    return v / np.max(v)
-
-
-# %%
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', parallel=True,
-     nogil=True)
-def v_mat_star_sigma_rev_approx(X, X_prime, data):
-    data_sorted = np.sort(data, 0)
-    data_l = data.shape[0]
-    eps = 1 / (data_l)  # Just an idea...
-    v = np.zeros(shape=(X.shape[0], X_prime.shape[0]))
-
-    for i in prange(X.shape[0]):
-        for j in range(X_prime.shape[0]):
-            accu = 1
-            for k in range(X.shape[1]):
-                dd = data_sorted[:, k]
-                f = (data_l - np.searchsorted(dd, np.maximum(X[i, k],
-                                                             X_prime[j, k]),
-                                              side="right")) / data_l
-                f1 = (np.searchsorted(dd, X[i, k], side="right")) / data_l
-                f2 = (np.searchsorted(dd, X_prime[j, k], side="right")) / data_l
-                accu *= f * f1 * (1 - f1) * f2 * (1 - f2)
-            v[i, j] = accu
-    return v
-
-
-# %%
-@mem.cache
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', parallel=True,
-     nogil=True)
-def v_mat_star_sigma_oneside(X, X_prime, X_num):
-    X_num_sorted = np.sort(X_num, 0)
-    X_num_l = X_num.shape[0]
-    eps = 1e-6
-    v = np.zeros(shape=(X.shape[0], X_prime.shape[0]))
-    for i in prange(X.shape[0]):
-        for j in range(X_prime.shape[0]):
-            acc = 1
-            for k in range(X.shape[1]):
-                f = np.searchsorted(X_num_sorted[:, k],
-                                    np.maximum(X[i, k], X_prime[j, k]),
-                                    side="right") / X_num_l
-                acc *= 1 / (1 + f)
-                # acc *= 1/(f*(1-f)+eps)
-            v[i, j] = acc
-    return v / np.max(v)
-
-
-# %%
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', nopython=True,
-     parallel=True, nogil=True)
-def v_mat_star_sigma_log(X, X_prime, dummy):
-    v = np.zeros(shape=(X.shape[0], X_prime.shape[0]))
-    for i in prange(X.shape[0]):
-        for j in range(X_prime.shape[0]):
-            acc = 1
-            for k in range(X.shape[1]):
-                acc *= -np.log(np.maximum(X[i, k], X_prime[j, k]))
-            v[i, j] = acc
-    return v / np.max(v)
-
-
-# %%
-import cvxopt
-
-
-def DensityRatio_QP(X_den, X_num, kernel, g, v_matrix, ridge=1e-3):
-    """
-    The function computes a model of the density ratio.
-    The function is in the form $A^T K$
-    The function returns the coefficients $\alpha_i$ and the bias term b
-    """
-    l_den, d = X_den.shape
-    l_num, d_num = X_num.shape
-
-    # TODO: Check d==d_num
-
-    ones_num = np.matrix(np.ones(shape=(l_num, 1)))
-    zeros_den = np.matrix(np.zeros(shape=(l_den, 1)))
-
-    gram = kernel(X_den)
-    K = np.matrix(gram + ridge * np.eye(l_den))
-    # K = np.matrix(gram)   # No ridge
-
-    print("K max, min: %e, %e" % (np.max(K), np.min(K)))
-
-    data = np.concatenate((X_den, X_num))
-    if callable(v_matrix):
-        V = np.matrix(v_matrix(X_den, X_den, data))
-        V_star = np.matrix(v_matrix(X_den, X_num, data))  # l_den by l_num
-    else:
-        return -1
-
-    print("V max,min: %e, %e" % (np.max(V), np.min(V)))
-    print("V_star max,min: %e, %e" % (np.max(V_star), np.min(V_star)))
-
-    tgt1 = K * V * K
-    print("K*V*K max, min: %e, %e" % (np.max(tgt1), np.min(tgt1)))
-
-    tgt2 = g * K
-    print("g*K max, min: %e, %e" % (np.max(tgt2), np.min(tgt2)))
-
-    P = cvxopt.matrix(2 * (tgt1 + tgt2))
-
-    q_ = -2 * (l_den / l_num) * (K * V_star * ones_num)
-
-    print("q max, min: %e, %e" % (np.max(q_), np.min(q_)))
-    q = cvxopt.matrix(q_)
-
-    #### Let's construct the inequality constraints
-
-    # Now create G and h
-    G = cvxopt.matrix(-K)
-    h = cvxopt.matrix(zeros_den)
-    # G = cvxopt.matrix(np.vstack((-K,-np.eye(l_den))))
-    # h = cvxopt.matrix(np.vstack((zeros_den,zeros_den)))
-
-    # Let's construct the equality constraints
-
-    A = cvxopt.matrix((1 / l_den) * K * V_star * ones_num).T
-    b = cvxopt.matrix(np.ones(1))
-
-    return cvxopt.solvers.qp(P, q, G, h, A, b, options=dict(
-        maxiters=50))  #### For expediency, we limit the number of iterations
-
-
-# %%
-def RKHS_Eval(A, X_test, X_train, kernel, c=0):
-    gramTest = kernel(X_test, X_train)
-
-    return np.dot(gramTest, A) + c
-
-
-# %%
-from sklearn.base import BaseEstimator, RegressorMixin
-
-from sklearn.preprocessing import StandardScaler
-
-
-class DensityRatio_Estimator(BaseEstimator, RegressorMixin):
-    """Custom Regressor for density ratio estimation"""
-
-    def __init__(self, krnl=rbf_krnl(1), g=1, v_matrix=v_mat_sigma_eye):
-        self.krnl = krnl
-        self.g = g
-        self.v_matrix = v_matrix
-
-    def fit(self, X_den, X_num):
-
-        self.X_train_ = np.copy(X_den)
-
-        res = DensityRatio_QP(self.X_train_,
-                              X_num,
-                              kernel=self.krnl,
-                              g=self.g,
-                              v_matrix=self.v_matrix)
-        self.A_ = res['x']
-        return self
-
-    def predict(self, X):
-        if self.A_ is None:
-            return None  # I should raise an exception
-
-        return self.predict_proba(X)
-
-    def predict_proba(self, X):
-        if self.A_ is None:
-            return None  # I should raise an exception
-
-        pred = RKHS_Eval(A=self.A_,
-                         X_test=X,
-                         X_train=self.X_train_,
-                         kernel=self.krnl)
-        return np.clip(pred, a_min=0, a_max=None, out=pred)
-
-
-# %%
-
-# %%
-def NeymanPearson_VMatrix(p_a, p_b, h0, p_a_test, p_b_test, g=0.5,
-                          krnl=ink_lin_krnl(1), v_matrix=v_mat_sigma_ratio,
-                          diag=True):
-    p_h0 = np.hstack((p_a[h0].reshape(-1, 1), p_b[h0].reshape(-1, 1)))
-    p_h1 = np.hstack((p_a[~h0].reshape(-1, 1), p_b[~h0].reshape(-1, 1)))
-
-    dre = DensityRatio_Estimator(v_matrix=v_matrix,
-                                 krnl=krnl,
-                                 g=g)
-    dre.fit(X_den=p_h1, X_num=p_h0)
-
-    lmbd_h0 = np.clip(dre.predict(p_h0), 1e-10, None)
-    v, q = ecdf(lmbd_h0)
-    v = np.concatenate(([0],
-                        v))  # This may be OK for this application but it is not correct in general
-    q = np.concatenate(([0], q))
-    NP_calibr = interp1d(v, q, bounds_error=False, fill_value="extrapolate")
-
-    p_test = np.hstack((p_a_test.reshape(-1, 1), p_b_test.reshape(-1, 1)))
-    p_npcomb = NP_calibr(dre.predict(p_test))
-
-    if diag:
-        f, axs = plt.subplots(1, 3, figsize=(12, 4))
-        x = np.linspace(0, 1, 100)
-        xx, yy = np.meshgrid(x, x)
-        lambd_grid = dre.predict(
-            np.hstack((xx.reshape(-1, 1), yy.reshape(-1, 1))))
-        comb_p_grid = NP_calibr(lambd_grid)
-        # im = axs[0].imshow(lambd_grid.reshape(100,100),interpolation=None,origin='lower')   
-        im = axs[0].contourf(xx, yy, lambd_grid.reshape(100, 100));
-        f.colorbar(im, ax=axs[0])
-        axs[0].set_title("Lambda")
-
-        # im = axs[2].imshow(comb_p_grid.reshape(100,100),interpolation=None,origin='lower')
-        im = axs[2].contourf(xx, yy, comb_p_grid.reshape(100, 100), vmin=0,
-                             vmax=1);
-        f.colorbar(im, ax=axs[2])
-        axs[2].set_title("Combined p-value")
-
-        x = np.linspace(0, np.max(lmbd_h0), 100)
-        axs[1].plot(x, NP_calibr(x))
-        axs[1].set_title("Lambda to p-value")
-        print("Max:", np.max(comb_p_grid))
-        print("Min:", np.min(comb_p_grid))
-
-        f.tight_layout()
-
-    return np.clip(p_npcomb.ravel(), 0, 1)
-
-
-# %%
-
-# %%
-p_0_a.shape
-
-# %%
-# %%time
-np_kwargs = dict(g=1e-5, krnl=rbf_krnl(4.5),
-                 v_matrix=v_mat_star_sigma_rev_approx)
-p_0_npcomb_vm = NeymanPearson_VMatrix(p_0_a_cal, p_0_b_cal, y_cal == 0, p_0_a,
-                                      p_0_b, **np_kwargs)
-p_1_npcomb_vm = NeymanPearson_VMatrix(p_1_a_cal, p_1_b_cal, y_cal == 1, p_1_a,
-                                      p_1_b, **np_kwargs)
-c_cf_npcomb_vm, precision_f_npcomb_vm = cp_statistics(p_0_npcomb_vm,
-                                                      p_1_npcomb_vm, None, None,
-                                                      y_test, "_np_v",
-                                                      " NP (V-Matrix)");
-
-# %%
-
-# %% [markdown]
-# + NNP Ideal                                                           | NA  	 606	14	 549	20	0	0	1880	1931
-# + g=1e-6,krnl=rbf_krnl(6),v_matrix=v_mat_star_sigma_rev_approx        | 0.01	 584	26	  67	21	0	0	1890	2412
-# + g=1e-5,krnl=rbf_krnl(6),v_matrix=v_mat_star_sigma_rev_approx        | 0.01	 562	17	 335	18	0	0	1921	2147  ## But better above 0.01
-# + g=1e-5,krnl=rbf_krnl(5),v_matrix=v_mat_star_sigma_rev_approx        | 0.01	 543	15	 549	18	0	0	1942	1933
-# + g=1e-5,krnl=rbf_krnl(4.5),v_matrix=v_mat_star_sigma_rev_approx      | 0.01	 545	16	 554	19	0	0	1939	1927
-
-# %%
-
-# %%
-
-# %%
-ps_0 = np.c_[p_0_a, p_0_b]
-ps_1 = np.c_[p_1_a, p_1_b]
-
-ps_0_cal = np.c_[p_0_a_cal, p_0_b_cal]
-ps_1_cal = np.c_[p_1_a_cal, p_1_b_cal]
-
-# %%
-
-# %%
-
-# %%
-
-# %%
-
-# %%
-
-# %% [markdown]
-# ## Base A
-
-# %%
-c_cf_a, precision_a = cp_statistics(p_0_a, p_1_a, None, None, y_test, "_a",
-                                    " base CP a");
-
-# %% [markdown]
-# ## Base B
-
-# %%
-c_cf_b, precision_b = cp_statistics(p_0_b, p_1_b, None, None, y_test, "_a",
-                                    " base CP a");
-
-
-# %%
-
-# %%
-def confusion_matrices(c_cf, epsilons=(0.01, 0.05, 0.10)):
-    idx = pd.IndexSlice
-
-    for eps in epsilons:
-        c_cf_eps = c_cf.loc[idx[:, eps], idx[:]]
-        c_cf_eps.index = c_cf_eps.index.droplevel(1)
-        c_cf_eps.index.name = "$\epsilon=%0.2f$" % eps
-
-        name_part = ("_%0.2f" % eps).replace('.', '_')
-        with open(pics_base_name + '_cf' + name_part + '.txt', "w") as mf:
-            print(c_cf_eps.to_latex(), file=mf)
-
-        display(c_cf_eps)
-
-    # %%
-
-
-p_plane_plot(p_0_a, p_1_a, y_test, "Conformal Predictor A", "_a")
-
-# %%
-p_plane_plot(p_0_npde, p_1_npde, y_test, "NNP combination", "_nnp")
-
-# %%
-p_plane_plot(p_0_f, p_1_f, y_test, "Fischer combination", "_f")
-
-# %%
-p_plane_plot(p_0_npidcomb, p_1_npidcomb, y_test, "NNP (ideal)", "_npid")
-
-# %%
-p_plane_plot(p_0_npcomb_vm, p_1_npcomb_vm, y_test, "NP (V-Matrix)", "_npvmat")
-
-# %%
-cfs_to_compare = [
-    (c_cf_a, "a"),
-    (c_cf_b, "b"),
-
-    (c_cf_npid, "NNP Ideal"),
-    (c_cf_npcomb, "NNP"),
-    (c_cf_npde, "NNP (spline)"),
-    (c_cf_npcomb_vm, "NP V-Matrix"),
-
-    (c_cf_avg, "Arith"),
-    (c_cf_geom, "Geom"),
-    (c_cf_max, "Max"),
-    (c_cf_min, "Min"),
-    (c_cf_bonf, "Bonferroni"),
-
-    (c_cf_avg_q, "Arithmetic (Quantile)"),
-    (c_cf_f, "Geometric (Quantile) Fisher"),
-    (c_cf_max_q, "Max (Quantile)"),
-    (c_cf_min_q, "Min (Quantile)"),
-    (c_cf_bonf_q, "Bonferroni (Quantile)"),
-
-    (c_cf_avg_ECDF, "Arithmetic (ECDF)"),
-    (c_cf_geom_ECDF, "Geometric (ECDF)"),
-    (c_cf_f_ECDF, "Fisher (ECDF)"),
-    (c_cf_max_ECDF, "Max (ECDF)"),
-]
-
-cfs, method_names = zip(*cfs_to_compare)
-
-c_cf = pd.concat(cfs,
-                 keys=method_names, names=("p-values", "epsilon"))
-confusion_matrices(c_cf)
-
-# %%
+# srv.stop()
