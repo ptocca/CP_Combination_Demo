@@ -741,21 +741,49 @@ mc = MultiCombination(sd, micp)
 
 # %%
 class AppMulti(param.Parameterized):
+
     sd = param.Parameter()
     micp = param.Parameter()
     mc = param.Parameter()
 
     def __init__(self, sd, micp, mc, **params):
+        super().__init__(**params)
         self.sd = sd
         self.micp = micp
         self.mc = mc
 
+        self.ui = self.create_ui()
+
+        self.ui_elem_selector.param.watch(self.update_UI, "value")
+        self.ui_elem_selector.param.trigger('value')
+
+    def update_UI(self, event):
+        ui = []
+        if "Synthetic Dataset" in event.value:
+            ui.append(self.sd_view)
+        elif "Base CPs" in event.value:
+            ui.append(self.micp_view)
+        elif "Combination" in event.value:
+            ui.append(self.comb_view)
+
+        self.ui[1] = pn.Column(*ui)
+
+    def create_ui(self):
+        ui_components_names = ["Synthetic Dataset", "Base CPs", "Combination"]
+        self.ui_elem_selector = pn.widgets.CheckBoxGroup(
+            value=[ui_components_names[0]], options=ui_components_names)
+        custom_mc_widgets = pn.Param(self.mc.param, widgets={
+                                     "methods": pn.widgets.CheckBoxGroup})
+        self.sd_view = pn.Row(self.sd.param, self.sd.view)
+        self.micp_view = pn.Row(self.micp.view_tables, self.micp.view_p_plane)
+        self.comb_view = pn.Row(custom_mc_widgets, self.mc.view_validity)
+
+        return pn.Row(self.ui_elem_selector, pn.Column(self.sd_view, self.micp_view, self.comb_view))
+
     def view(self):
-        
-        custom_mc_widgets = pn.Param(self.mc.param, widgets={"methods": pn.widgets.CheckBoxGroup})
-        return pn.Column(pn.Row(self.sd.param, self.sd.view),
-                         # pn.Row(self.micp.view_tables, self.micp.view_p_plane),
-                         pn.Row(custom_mc_widgets, self.mc.view_validity))
+        return self.ui
+
+    
 
 
 
