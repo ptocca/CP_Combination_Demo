@@ -363,11 +363,9 @@ micp = MICP(sd)
 # %%
 
 # %%
-def ECDF_comb(comb_func, ps, ps_cal):
-    """Note: ps_cal are the p-values of the calibration examples with the same label as the p-value.
-    Example: ECDF_comb(minimum, ps_test_0, ps_cal_0[y_cal==0])"""
+def ECDF_comb(comb_func, ps, ps_cal, h0_cal):
     p_comb = comb_func(ps)
-    ps_cal_comb = comb_func(ps_cal)
+    ps_cal_comb = comb_func(ps_cal[h0_cal])
     return ECDF_cal_p(p_comb, ps_cal_comb)
 
 
@@ -380,14 +378,14 @@ def KolmogorovAveraging(p_vals, phi, phi_inv):
 # ## Arithmetic mean
 
 # %%
-def comb_arithmetic(ps, _=None):
+def comb_arithmetic(ps,  *unused):
     return np.mean(ps, axis=1)
 
-def comb_arithmetic_conservative(ps, _=None):
+def comb_arithmetic_conservative(ps,  *unused):
     return np.clip(2*np.mean(ps, axis=1), a_min=0.0, a_max=1.0)
 
-def comb_arithmetic_ECDF(ps, ps_cal):
-    return ECDF_comb(comb_arithmetic, ps, ps_cal)
+def comb_arithmetic_ECDF(ps,  ps_cal, h0_cal):
+    return ECDF_comb(comb_arithmetic, ps, ps_cal, h0_cal)
 
 
 # %%
@@ -411,7 +409,7 @@ Irwin_Hall_CDF = np.vectorize(Irwin_Hall_CDF_base, excluded=(1, "n"))
 from functools import partial
 
 
-def comb_arithmetic_q(ps, _=None):
+def comb_arithmetic_q(ps,  *unused):
     phi = lambda x: x.shape[1] * x
     phi_inv = partial(Irwin_Hall_CDF, n=ps.shape[1])
     return KolmogorovAveraging(ps, phi, phi_inv)
@@ -425,45 +423,42 @@ import scipy.stats as ss
 
 # %%
 # %%
-def comb_geometric(ps, _=None):
+def comb_geometric(ps,  *unused):
     return ss.gmean(ps, axis=1)
 
 # %%
-def comb_geometric_conservative(ps, _=None):
+def comb_geometric_conservative(ps,  *unused):
     return np.clip(np.e*ss.gmean(ps, axis=1), a_min=0.0, a_max=1.0)
 
 # %% [markdown]
 # ## Fisher combination
 
 # %%
-def fisher(p, _=None):
+def fisher(p, *unused):
     k = np.sum(np.log(p), axis=1).reshape(-1, 1)
     fs = -k / np.arange(1, p.shape[1]).reshape(1, -1)
     return np.sum(np.exp(
         k + np.cumsum(np.c_[np.zeros(shape=(p.shape[0])), np.log(fs)], axis=1)),
         axis=1)
 
-
 # %%
 
-def comb_geometric_ECDF(ps, ps_cal):
-    return ECDF_comb(comb_geometric, ps, ps_cal)
-# %%
-
+def comb_geometric_ECDF(ps,  ps_cal, h0_cal):
+    return ECDF_comb(comb_geometric, ps, ps_cal, h0_cal)
 
 # %% [markdown]
 # ## Max p
 
 # %%
-def comb_maximum(ps, _=None):
+def comb_maximum(ps,  *unused):
     return np.max(ps, axis=1)
 
 
 # %%
-def comb_maximum_ECDF(ps, ps_cal):
-    return ECDF_comb(comb_minimum, ps, ps_cal)
+def comb_maximum_ECDF(ps, ps_cal, h0_cal):
+    return ECDF_comb(comb_minimum, ps, ps_cal, h0_cal)
 # %%
-def comb_maximum_q(ps, _=None):
+def comb_maximum_q(ps,  *unused):
     max_ps = comb_maximum(ps)
     phi_inv = ss.beta(a=ps.shape[1], b=1).cdf
 
@@ -473,32 +468,32 @@ def comb_maximum_q(ps, _=None):
 # ## Minimum and Bonferroni
 
 # %%
-def comb_minimum(ps, _=None):
+def comb_minimum(ps,  *unused):
     return np.min(ps, axis=1)
 
 
 # %%
-def comb_minimum_ECDF(ps, ps_cal):
-    return ECDF_comb(comb_minimum, ps, ps_cal)
+def comb_minimum_ECDF(ps,  ps_cal, h0_cal):
+    return ECDF_comb(comb_minimum, ps, ps_cal, h0_cal)
 
 
 # %% [markdown]
 # The k-order statistic of n uniformly distributed variates is distributed as Beta(k,n+1-k).
 
 # %%
-def comb_minimum_q(ps, _=None):
+def comb_minimum_q(ps,  *unused):
     min_ps = comb_minimum(ps)
     phi_inv = ss.beta(a=1, b=ps.shape[1]).cdf
 
     return phi_inv(min_ps)
 
 # %%
-def comb_bonferroni(ps, _=None):
+def comb_bonferroni(ps,  *unused):
     return np.clip(ps.shape[1] * np.min(ps, axis=1), 0, 1)
 
 
 # %%
-def comb_bonferroni_q(ps, _=None):
+def comb_bonferroni_q(ps,  *unused):
     b_ps= p.shape[1] * np.min(ps, axis=1)
     phi_inv = ss.beta(a=1, b=ps.shape[1]).cdf
 
@@ -506,6 +501,9 @@ def comb_bonferroni_q(ps, _=None):
                     phi_inv(b_ps / ps.shape[1]),
                     1.0)
 
+
+# %%
+import NP_Combine
 
 # %%
 methodFunc = {"Arithmetic Mean": comb_arithmetic,
@@ -522,6 +520,8 @@ methodFunc = {"Arithmetic Mean": comb_arithmetic,
               "Bonferroni": comb_bonferroni,
               "Minimum (quantile)": comb_minimum_q,
               "Minimum (ECDF)": comb_minimum_ECDF,
+
+              "Naive Neyman-Pearson": NP_Combine.comb_nnp,
               }
 
 
@@ -553,87 +553,7 @@ def cp_cm_widget(p_0, p_1, y):
 
 
 # %%
-class SimpleCombination(param.Parameterized):
-    sd = param.Parameter(precedence=-1)
-    micp = param.Parameter(precedence=-1)
-    p_comb_0 = param.Array(precedence=-1)
-    p_comb_1 = param.Array(precedence=-1)
 
-    method = param.Selector(list(methodFunc.keys()))
-
-    def __init__(self, sd, micp, **params):
-        self.sd = sd
-        self.micp = micp
-        super(SimpleCombination, self).__init__(**params)
-        self.update()
-
-    @pn.depends("micp.p_0_a", "micp.p_1_a", "micp.p_0_b", "micp.p_1_b",
-                "method", watch=True)
-    def update(self):
-        comb_method = methodFunc[self.method]
-        y_pcal = self.sd.output['y_pcal']
-        ps_0 = np.c_[self.micp.p_0_a, self.micp.p_0_b]
-        ps_pcal_0 = np.c_[self.micp.p_0_a_cal[y_pcal == 0], self.micp.p_0_b_cal[y_pcal == 0]]
-        ps_1 = np.c_[self.micp.p_1_a, self.micp.p_1_b]
-        ps_pcal_1 = np.c_[self.micp.p_1_a_cal[y_pcal == 1], self.micp.p_1_b_cal[y_pcal == 1]]
-
-        with param.batch_watch(self):
-            self.p_comb_0 = comb_method(ps_0, ps_pcal_0)
-            self.p_comb_1 = comb_method(ps_1, ps_pcal_1)
-    
-    @pn.depends("p_comb_0", "p_comb_1")
-    def view_table(self):
-        return cp_cm_widget(self.p_comb_0, self.p_comb_1,
-                            self.sd.output['y_test'])
-
-    @pn.depends("p_comb_0", "p_comb_1")
-    def view_validity(self):
-        f = Figure()
-        ax = f.add_subplot(1, 1, 1)
-        ax.plot(*ecdf(self.p_comb_0[self.sd.output['y_test'] == 0]))
-        ax.plot(*ecdf(self.p_comb_1[self.sd.output['y_test'] == 1]))
-        ax.plot((0, 1), (0, 1), "k--")
-        ax.set_aspect(1.0)
-        ax.set_xlabel("Target error rate")
-        ax.set_ylabel("Actual error rate")
-
-        return f
-
-        
-
-# %%
-sc = SimpleCombination(sd, micp)
-
-
-# %%
-
-# %%
-class App(param.Parameterized):
-    sd = param.Parameter()
-    micp = param.Parameter()
-    sc = param.Parameter()
-
-    def __init__(self, sd, micp, fisher, **params):
-        self.sd = sd
-        self.micp = micp
-        self.sc = sc
-
-    @pn.depends("sc.p_comb_0", "sc.p_comb_1", watch=True)
-    def view(self):
-        return pn.Column(pn.Row(sd.param, sd.view),
-                         pn.Row(micp.view_tables, micp.view_p_plane),
-                         pn.Row(sc.param, sc.view_table, sc.view_validity))
-
-
-# %%
-
-# %%
-if 0:
-    app = App(sd, micp, sc)
-    app.view()
-
-
-# %%
 
 # %%
 # ss.pearsonr(p_0_a,p_0_b),ss.pearsonr(p_1_a,p_1_b)
@@ -688,10 +608,10 @@ class MultiCombination(param.Parameterized):
                 comb_method = methodFunc[m]
             except TypeError:
                 comb_method = methodFunc[m[0]]
-            ps_pcal_0 = np.c_[self.micp.p_0_a_cal[y_pcal == 0], self.micp.p_0_b_cal[y_pcal == 0]]
-            ps_pcal_1 = np.c_[self.micp.p_1_a_cal[y_pcal == 1], self.micp.p_1_b_cal[y_pcal == 1]]
-            p_comb_0[i] = comb_method(ps_0, ps_pcal_0)
-            p_comb_1[i] = comb_method(ps_1, ps_pcal_1)
+            ps_pcal_0 = np.c_[self.micp.p_0_a_cal, self.micp.p_0_b_cal]
+            ps_pcal_1 = np.c_[self.micp.p_1_a_cal, self.micp.p_1_b_cal]
+            p_comb_0[i] = comb_method(ps_0, ps_pcal_0, y_pcal==0)
+            p_comb_1[i] = comb_method(ps_1, ps_pcal_1, y_pcal==1)
         with param.batch_watch(self):
             self.p_comb_0 = p_comb_0
             self.p_comb_1 = p_comb_1
@@ -837,4 +757,6 @@ ui = am.view()
 srv = ui.show()
 
 # %%
-# srv.stop()
+srv.stop()
+
+# %%
