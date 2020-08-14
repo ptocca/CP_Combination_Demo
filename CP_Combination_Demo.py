@@ -505,6 +505,8 @@ def comb_bonferroni_q(ps,  *unused):
 # %%
 import NP_Combine
 
+import VMatrix_Combine
+
 # %%
 methodFunc = {"Arithmetic Mean": comb_arithmetic,
               "Arithmetic Mean (conservative)": comb_arithmetic_conservative,
@@ -522,6 +524,7 @@ methodFunc = {"Arithmetic Mean": comb_arithmetic,
               "Minimum (ECDF)": comb_minimum_ECDF,
 
               "Naive Neyman-Pearson": NP_Combine.comb_nnp,
+              "V-Matrix Neyman-Pearson": VMatrix_Combine.comb_np_vm,
               }
 
 
