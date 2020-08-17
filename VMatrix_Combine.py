@@ -199,8 +199,7 @@ def v_mat_max(X, X_prime, dummy):
 
 
 # @mem.cache
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', parallel=True,
-     nogil=True)
+@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])')
 def v_mat_sigma_ratio(X, X_prime, data):
     data_sorted = np.sort(data, 0)
     data_l = data.shape[0]
@@ -230,8 +229,7 @@ from statsmodels.distributions.empirical_distribution import ECDF
 
 
 # %%
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', parallel=True,
-     nogil=True)
+@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])')
 def v_mat_star_sigma_ratio_approx(X, X_prime, data):
     data_sorted = np.sort(data, 0)
     data_l = data.shape[0]
@@ -254,8 +252,7 @@ def v_mat_star_sigma_ratio_approx(X, X_prime, data):
 
 
 # %%
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', parallel=True,
-     nogil=True)
+@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])')
 def v_mat_star_sigma_oneside_approx(X, X_prime, data):
     data_sorted = np.sort(data, 0)
     data_l = data.shape[0]
@@ -278,8 +275,7 @@ def v_mat_star_sigma_oneside_approx(X, X_prime, data):
 
 
 # %%
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', parallel=True,
-     nogil=True)
+@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])')
 def v_mat_star_sigma_rev_approx(X, X_prime, data):
     data_sorted = np.sort(data, 0)
     data_l = data.shape[0]
@@ -303,8 +299,7 @@ def v_mat_star_sigma_rev_approx(X, X_prime, data):
 
 # %%
 @mem.cache
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', parallel=True,
-     nogil=True)
+@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])')
 def v_mat_star_sigma_oneside(X, X_prime, X_num):
     X_num_sorted = np.sort(X_num, 0)
     X_num_l = X_num.shape[0]
@@ -324,8 +319,7 @@ def v_mat_star_sigma_oneside(X, X_prime, X_num):
 
 
 # %%
-@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])', nopython=True,
-     parallel=True, nogil=True)
+@jit('float64[:,:](float64[:,:],float64[:,:],float64[:,:])')
 def v_mat_star_sigma_log(X, X_prime, dummy):
     v = np.zeros(shape=(X.shape[0], X_prime.shape[0]))
     for i in prange(X.shape[0]):
@@ -507,8 +501,12 @@ def NeymanPearson_VMatrix(p_a, p_b, h0, p_a_test, p_b_test, g=0.5,
 
 # %%
 # %%time
-
+@mem.cache
 def comb_np_vm(ps, ps_cal, h0_cal):
-    nnp_kwargs = dict(g=1e-5, krnl=rbf_krnl(4.5),
-                 v_matrix=v_mat_star_sigma_rev_approx)
+#    nnp_kwargs = dict(g=1e-5, krnl=rbf_krnl(4.5),
+    nnp_kwargs = dict(g=1e-2, krnl=rbf_krnl(1.5),
+#                 v_matrix=v_mat_star_sigma_rev_approx)
+                 v_matrix=v_mat_star_eye)
+
+ 
     return NeymanPearson_VMatrix(ps_cal[:,0], ps_cal[:,1], h0_cal, ps[:,0], ps[:,1], **nnp_kwargs)

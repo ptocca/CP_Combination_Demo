@@ -22,6 +22,7 @@ import scipy.stats as ss
 from sklearn.model_selection import train_test_split
 import pandas as pd
 
+from os.path import join
 # %%
 from IPython.display import display, HTML
 
@@ -68,7 +69,81 @@ def plot_score_hist(alpha_0_a, alpha_0_b, alpha_1_a, alpha_1_b):
                fontsize=16);
     return f
 
+# %%
+class RealDataSet(param.Parameterized):
+    N = param.Integer(default=2000, bounds=(100, 100000))
+    seed = param.Integer(default=0, bounds=(0, 32767))
+    data_fn = param.Foldername(default='/home/paolo/Research/Data/')
 
+    # Outputs
+    output = param.Dict(default=dict(),
+                        precedence=-1)  # To have all updates in one go
+
+    n = 2
+
+    def __init__(self, **params):
+        self.micp_calibration_fraction = 0.5
+        self.comb_calibration_fraction = 0.1        
+        super().__init__(**params)
+        self.update()
+
+    def update(self):
+        output = dict()
+
+        with open(join(self.data_fn, 'IDH1_labels')) as f:
+            y = np.loadtxt(f)
+
+        with open(join(self.data_fn, 'IDH1_Splits', '000', 'idxs_cal')) as f:
+            idx_cal = np.loadtxt(f,dtype=int)
+
+        y_cal = y[idx_cal]
+        y_cal[y_cal==-1] = 0
+
+        set_a = 'LinSVC'
+        with open(join(self.data_fn, set_a, '000', 'y_hat_cal')) as f:
+            scores_cal_a = np.loadtxt(f)
+
+
+        set_b = 'XGB'
+        with open(join(self.data_fn, set_b, '000', 'y_hat_cal')) as f:
+            scores_cal_b = np.loadtxt(f)
+
+
+
+        micp_calibration_size = int(self.micp_calibration_fraction * self.N)
+        comb_calibration_size = int(self.comb_calibration_fraction * self.N)
+        scores_tr_a, output['scores_test_a'], \
+        scores_tr_b, output['scores_test_b'], \
+        y_tr, output['y_test'] = train_test_split(scores_cal_a, scores_cal_b, y_cal,
+                                                  train_size=micp_calibration_size + comb_calibration_size,
+                                                  stratify=y_cal)
+
+        output['scores_cal_a'], output['scores_pcal_a'], \
+        output['scores_cal_b'], output['scores_pcal_b'], \
+        output['y_cal'], output['y_pcal'] = train_test_split(scores_tr_a,
+                                                             scores_tr_b, y_tr,
+                                                             train_size=micp_calibration_size,
+                                                             stratify=y_tr)
+
+        self.output = output
+
+    @pn.depends("N", "seed")
+    def view(self):
+        self.update()
+        f = plot_score_hist(
+            self.output['scores_cal_a'][self.output['y_cal'] == 0],
+            self.output['scores_cal_b'][self.output['y_cal'] == 0],
+            self.output['scores_cal_a'][self.output['y_cal'] == 1],
+            self.output['scores_cal_b'][self.output['y_cal'] == 1])
+
+        return f
+
+    def view2(self):
+        return "# %d" % self.N
+
+
+rd = RealDataSet()
+# %%
 class SynthDataSet(param.Parameterized):
     N = param.Integer(default=2000, bounds=(100, 10000))
     percentage_of_positives = param.Number(default=50.0, bounds=(0.1, 100.0))
@@ -163,7 +238,7 @@ class SynthDataSet(param.Parameterized):
 
 sd = SynthDataSet()
 
-
+idata = rd
 # %%
 def p_plane_plot(p_0, p_1, y, title_part, pics_title_part):
     def alpha_y(y):
@@ -347,7 +422,7 @@ class MICP(param.Parameterized):
 # Now we compute the p-values with Mondrian Inductive
 
 # %%
-micp = MICP(sd)
+micp = MICP(idata)
 
 
 # %%
@@ -699,7 +774,7 @@ class MultiCombination(param.Parameterized):
         return gridplot([[ax_v_0, ax_v_1],
                          [ax_eff, ax_eff_d]])
     
-mc = MultiCombination(sd, micp)
+mc = MultiCombination(idata, micp)
 
 
 # %%
@@ -751,7 +826,7 @@ class AppMulti(param.Parameterized):
 
 
 # %%
-am = AppMulti(sd,micp,mc)
+am = AppMulti(idata,micp,mc)
 
 # %%
 ui = am.view()
@@ -760,6 +835,6 @@ ui = am.view()
 srv = ui.show()
 
 # %%
-srv.stop()
+# srv.stop()
 
 # %%
