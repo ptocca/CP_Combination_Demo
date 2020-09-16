@@ -209,13 +209,8 @@ def ECDF_cal_p(p_test, p_cal):
     return us(p_test)
 
 
-# %% [markdown]
-# # Let's apply MICP as usual
-
-# %% [markdown]
-# Let's now redo things computing $p_0$ and $p_1$.
-#
-# Let's assume that the 'alphas' are actually the decision function values out of an SVM.
+# %%
+# MICP
 
 # %%
 from CP import pValues
@@ -375,8 +370,8 @@ def KolmogorovAveraging(p_vals, phi, phi_inv):
     return phi_inv(np.sum(phi(p_vals), axis=1) / p_vals.shape[1])
 
 
-# %% [markdown]
-# ## Arithmetic mean
+# %%
+## Arithmetic mean
 
 # %%
 def comb_arithmetic(ps,  *unused):
@@ -416,8 +411,8 @@ def comb_arithmetic_q(ps,  *unused):
     return KolmogorovAveraging(ps, phi, phi_inv)
 
 
-# %% [markdown]
-# ## Geometric mean
+# %%
+## Geometric mean
 
 # %%
 import scipy.stats as ss
@@ -431,8 +426,8 @@ def comb_geometric(ps,  *unused):
 def comb_geometric_conservative(ps,  *unused):
     return np.clip(np.e*ss.gmean(ps, axis=1), a_min=0.0, a_max=1.0)
 
-# %% [markdown]
-# ## Fisher combination
+# %%
+## Fisher combination
 
 # %%
 def fisher(p, *unused):
@@ -446,8 +441,8 @@ def fisher(p, *unused):
 
 def comb_geometric_ECDF(ps,  ps_cal, h0_cal):
     return ECDF_comb(comb_geometric, ps, ps_cal, h0_cal)
-# %% [markdown]
-# ## Max p
+# %%
+## Max p
 
 # %%
 def comb_maximum(ps,  *unused):
@@ -464,8 +459,8 @@ def comb_maximum_q(ps,  *unused):
 
     return phi_inv(max_ps)
 
-# %% [markdown]
-# ## Minimum and Bonferroni
+# %%
+## Minimum and Bonferroni
 
 # %%
 def comb_minimum(ps,  *unused):
@@ -477,7 +472,7 @@ def comb_minimum_ECDF(ps,  ps_cal, h0_cal):
     return ECDF_comb(comb_minimum, ps, ps_cal, h0_cal)
 
 
-# %% [markdown]
+# %%
 # The k-order statistic of n uniformly distributed variates is distributed as Beta(k,n+1-k).
 
 # %%
