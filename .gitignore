@@ -133,3 +133,6 @@ dmypy.json
 /.idea/.gitignore
 /.idea/misc.xml
 /.idea/inspectionProfiles/profiles_settings.xml
+
+output.pkl
+metadata.json

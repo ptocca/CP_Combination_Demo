@@ -10,3 +10,4 @@ param==1.9.3
 bokeh==2.1.1
 numba==0.48.0
 cvxopt==1.2.5
+statsmodels==0.11.0
