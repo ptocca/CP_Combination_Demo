@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # ---
 # jupyter:
 #   jupytext:
@@ -445,7 +446,6 @@ def fisher(p, *unused):
 
 def comb_geometric_ECDF(ps,  ps_cal, h0_cal):
     return ECDF_comb(comb_geometric, ps, ps_cal, h0_cal)
-
 # %% [markdown]
 # ## Max p
 
@@ -527,8 +527,8 @@ methodFunc = {"Arithmetic Mean": comb_arithmetic,
               "V-Matrix Neyman-Pearson": VMatrix_Combine.comb_np_vm,
               }
 
-
 # %%
+
 
 # %%
 def cp_cm_widget(p_0, p_1, y):
@@ -625,10 +625,8 @@ class MultiCombination(param.Parameterized):
                             self.sd.output['y_test'])
 
     @pn.depends("p_comb_0", "p_comb_1")
-    def view_validity(self):
-        p_w = 300
-        p_h = 300
-        ax_v_0 = figure(title="Validity plot for combined $p_0$", plot_width=p_w, plot_height=p_h)
+    def view_validity(self, p_w = 500, p_h = 500):
+        ax_v_0 = figure(title="Validity plot for combined p₀", plot_width=p_w, plot_height=p_h)
 
         for i,m in enumerate(self.methods):
             x,y = ecdf(self.p_comb_0[i][self.sd.output['y_test'] == 0])
@@ -639,7 +637,7 @@ class MultiCombination(param.Parameterized):
         ax_v_0.xaxis.bounds = (0,1)
         ax_v_0.yaxis.bounds = (0,1)
 
-        ax_v_1 = figure(title="Validity plot for combined $p_1$", plot_width=p_w, plot_height=p_h)
+        ax_v_1 = figure(title="Validity plot for combined p₁", plot_width=p_w, plot_height=p_h)
         for i,m in enumerate(self.methods):
             x,y = ecdf(self.p_comb_1[i][self.sd.output['y_test'] == 1])
             ax_v_1.line(x, y, legend_label=m, color=ColorCycler(i), line_width=2)
@@ -653,7 +651,8 @@ class MultiCombination(param.Parameterized):
         ax_v_1.line(x=(0,1), y=(0,1), line_color="black", name='Ideal', line_dash="dashed")
         
         tooltips = [("Significance level","@x")]
-        ax_eff = figure(title="Efficiency of combined CP", tools="box_zoom,reset", tooltips=tooltips, plot_width=p_w, plot_height=p_h)
+        ax_eff = figure(title="Efficiency of combined CP", tools="box_zoom,reset,save", tooltips=tooltips, plot_width=p_w, plot_height=p_h)
+        #ax_eff = figure(title="Efficiency of combined CP", plot_width=p_w, plot_height=p_h)
         
         cds_df = pd.DataFrame(columns=['x'])
         for i,m in enumerate(self.methods):
@@ -671,7 +670,7 @@ class MultiCombination(param.Parameterized):
         for i,m in enumerate(self.methods):        
             ax_eff.line(x='x', y='%s'%m, source=cds_df, legend_label=m, color=ColorCycler(i), line_width=2)
             
-        ax_eff.add_tools(HoverTool(mode='vline', tooltips=tooltips, names=self.methods, line_policy='nearest'))
+        # ax_eff.add_tools(HoverTool(mode='vline', tooltips=tooltips, names=self.methods, line_policy='nearest'))
         
         
             
@@ -755,11 +754,15 @@ am = AppMulti(sd,micp,mc)
 
 # %%
 ui = am.view()
+ui
 
 # %%
-srv = ui.show()
+# srv = ui.show()
 
 # %%
-srv.stop()
+# srv.stop()
 
 # %%
+# srv1 = pn.Row(mc.view_validity(p_w = 500, p_h=500)).show()
+# %%
+# srv1.stop()
