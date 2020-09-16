@@ -339,7 +339,7 @@ class MICP(param.Parameterized):
         return f
 
 
-# %% [markdown]
+# %%
 # Now we compute the p-values with Mondrian Inductive
 
 # %%
