@@ -31,7 +31,7 @@ display(HTML("<style>.container {width: 90% !important;} </style>"))
 # %%
 import panel as pn
 
-pn.extension(comm='ipywidgets')
+pn.extension('mathjax',comm='ipywidgets')
 
 # %%
 # %matplotlib inline
@@ -749,10 +749,76 @@ am = AppMulti(sd,micp,mc)
 
 # %%
 ui = am.view()
-ui
 
 # %%
-# srv = ui.show()
+notes = pn.pane.LaTeX(r"""
+<h1>Notes</h1>
+This demo accompanies the paper <a href="http://proceedings.mlr.press/v105/toccaceli19a/toccaceli19a.pdf"> 'CP Combination via Neyman-Pearson Lemma'</a> presented at COPA2019 as well as Chapter 6 of P. Toccaceli PhD Thesis.<br>
+
+It allows a user to experiment with various methods for the combination of Conformal Predictors (in the case of binary classification).
+
+
+<h2>Structure of the demo</h2>
+The demo considers two sets of NCMs, computed by two different hypothetical underlying ML methods denoted with A and B, on the same set of observations.<br>
+The NCMs are generated as variates of two Gaussians.<br>
+The NCMs for observations of class 'Negative' are centered on -1 and those of the class 'Positive' on +1.<br>
+The demo has three components that can be displayed or hidden via the tickboxes at the left.<br>
+The "Synthetic Dataset" panel allows the user to choose interactively the parameters governing the generation of the dataset of NCMs.
+The user can choose the relative proportions of the two classes ('Negative' and 'Positive'), the initialization of the Pseudo-Random Number Generator, 
+the correlation coefficient and the variance.<br>
+The 'Base CPs' panels shows the CP confusion matrices for the base CPs arising from the NCM generated as synthetic dataset. 
+This table is mainly for completeness.<br>
+The 'Combination' panel presents a choice a combination methods and displays the validity and efficiency in four plots. 
+The top row contains two validity plots, one for the 'Negative' class and one for the 'Positive' class. In the row below, the average set size 
+(as function of the target error rate) is plotted. The diagram on the right presents the delta between the achieved average set size and the ideal one. <br>
+<br>
+NOTE: The V-Matrix Neyman-Pearson method can be slow, especially for data set sizes larger than 5000.
+
+
+<h2>Brief reminder of the theory</h2>
+We recall briefly the key points (please to the sources mentioned above for the details).<br>
+ we consider fixed methods and adaptive methods. The fixed methods are summarised in the table below.
+Generally, the combination functions result in loss of validity, whereas the merging function preserve it but at the cost of efficiency.
+It is possible to recover validity if one knows the CDF of the combined CP. Indeed, for some combination functions, such CDF is known, under
+the assumption of independence.
+
+\[ %\renewcommand{\arraystretch}{2}
+    \begin{array}{c|c|c|c}
+    & \text{Combination function} & \text{Merging function} & \text{Combination function CDF} \\
+    \text{Arithmetic average} &  p_{arith\_avg} = \frac{1}{d}\sum_{i=1}^{d}p^{(i)} &  2 \cdot p_{arith\_avg} & \frac{1}{n!} \sum_{k=0}^{ \left \lfloor {t} \right \rfloor} {(-1)}^k {d \choose k} {(t-k)}^{d} \\
+    \text{Geometric average}  &  p_{geom\_avg} = {\left ( \prod_{i=1}^{d}p^{(i)} \right )}^{\frac{1}{d}}  &  e \cdot p_{geom\_avg}  & t\sum_{i=0}^{d-1}\frac{(-\log t)^i}{i!} \\
+    \text{Min}               &  p_{min} = \min(p^{(1)},\dots,p^{(d)})   &  d \cdot p_{min}  & \text{Beta}(d,1) \\
+    \text{Max }              &   p_{max} = \max(p^{(1)},\dots,p^{(d)})     & p_{max}  & \text{Beta}(1,d)
+    \end{array} \]
+
+It can be argued that the assumption of independence is not realistic.
+The p-values come from CP with different underlying algorithms, but refer to the same object.<br>
+
+The dependence among p-values can follow patterns that cannot be predicted a priori. So, adaptive methods are considered. 
+One approach is to reserve part of the training set to create a calibration set for the combined p-values. The ECDF of the combined p-values of 
+this calibration combination set is used to calibrate the combined p-values for the test set.<br>
+
+In the demo, the merging functions are denoted with '(conservative)', the calibration via CDF with '(quantile)' and the 'adaptive' calibration with '(ECDF)'. <br>
+
+The adaptive approach, while resulting in (practically) valid p-values at the cost of sacrificing part of the training set, still suffers from the possibility that the combination law might not be optimal 
+(in the sense of achieving the best efficiency).
+
+We use the Neyman-Pearson Lemma to combine the p-values so that the efficiency is optimal.
+
+The most powerful test between two simple hypothesis $H_0: \theta = \theta_0$ and $H_1: \theta = \theta_1$ is the one that uses as test statistic the likelihood ratio:
+\[ \Lambda(x) := \frac{\mathcal{L}(\theta_0 | x)}{\mathcal{L}(\theta_1 | x)} \]
+and as threshold the value $\eta$ that satisfies
+\[
+\epsilon = \mathbb{P}\left[ \Lambda(X) \leq \eta \; \middle| \; H_0 \right]
+\]
+where $\epsilon$ is the significance level.
+
+""")
+
+ui_and_notes = pn.Tabs(("CP Combinations",ui),
+              ("Notes",notes))
+
+srv = ui_and_notes.show()
 
 # %%
 # srv.stop()
