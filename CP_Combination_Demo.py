@@ -818,7 +818,7 @@ where $\epsilon$ is the significance level.
 ui_and_notes = pn.Tabs(("CP Combinations",ui),
               ("Notes",notes))
 ui_and_notes                # render inline for use with 'appmode'
-#%%
+# %%
 # srv = ui_and_notes.show()
 
 # %%
